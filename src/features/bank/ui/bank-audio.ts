@@ -121,6 +121,17 @@ export class BankAudio implements BankAudioPort {
         this.lowWeight(at, .32, deposit ? .15 : .22);
         this.metalTap(at + (reduced ? .04 : .115), .065, deposit ? 1040 : 770);
         break;
+      case 'change':
+        this.metalTap(at, .074, 1270);
+        break;
+      case 'merge':
+        this.scrape(1150, 'bandpass', { at, length: reduced ? .12 : .32, volume: .075, attack: .062 });
+        this.metalTap(at + .045, .045, 740);
+        break;
+      case 'mint':
+        this.metalTap(at, .092, beat.coin?.value === 100 ? 1170 : 940);
+        this.tone({ at: at + .025, length: .26, frequency: 1568, volume: .059, shape: 'triangle' });
+        break;
       case 'wake':
         this.tone({ at, length: reduced ? .19 : .43, frequency: 43, end: 75, volume: .16, attack: .09, shape: 'triangle' });
         this.scrape(510, 'bandpass', { at, length: .27, volume: .145, attack: .06 });

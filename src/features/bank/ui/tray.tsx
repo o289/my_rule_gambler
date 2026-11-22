@@ -3,6 +3,7 @@ import type { CSSProperties, ReactNode } from 'react';
 import type { Coin, CoinValue } from '../model/bank-model';
 import type { BankSnapshot } from '../application/bank-player';
 import { GoldCoin } from './coin';
+import { CoinMerger } from './coin-compression';
 
 function Balance({ score, animate }: { score: number; animate: boolean }) {
   const value = useRef<HTMLOutputElement>(null);
@@ -62,12 +63,21 @@ function CoinGroups({ wallet, renderCoin }: { wallet: readonly Coin[]; renderCoi
 }
 
 export function PlayerTray({ snapshot, playerName }: { snapshot: BankSnapshot; playerName: string }) {
-  const { wallet, balance, run, mode } = snapshot;
+  const tray = useRef<HTMLDivElement>(null);
+  const { wallet, balance, run, mode, compression } = snapshot;
   const deposit = mode === 'deposit';
   const reserved = new Set(!deposit && run?.playing ? run.payment.map(coin => coin.id) : []);
-  const arrivals = deposit && run && !run.reduced ? [...run.flights.values()] : [];
+  const incoming = run ? deposit ? run.payment : run.change : [];
+  const arrivals = run && !run.reduced ? [...run.flights.values()].filter(flight => flight.direction === 'deposit') : [];
+  const returning = Boolean(run?.playing && run.reached.has('change'));
+  const step = compression?.playing ? compression.steps[compression.index] : undefined;
+  const gathering = compression?.cue === 'merge' ? step : undefined;
+  const minted = compression?.cue === 'mint' ? step?.output.id : undefined;
+  const gatheringIds = new Set(gathering?.inputs.map(coin => coin.id));
+  const animateMerge = Boolean(gathering && !compression?.reduced && typeof Element.prototype.animate === 'function');
+  const outgoing = run?.transaction.tender ?? run?.transaction.amount;
   return (
-    <section className="player-area" aria-label="プレイヤーの得点と所持コイン" data-paying={Boolean(run?.playing)} data-direction={mode}>
+    <section className="player-area" aria-label="プレイヤーの得点と所持コイン" data-paying={Boolean(run?.playing)} data-direction={mode} data-incoming={returning}>
       <div className="wallet-score" data-balance={balance}>
         <span className="player-name">{playerName}</span>
         <div className="wallet-value">
@@ -75,23 +85,28 @@ export function PlayerTray({ snapshot, playerName }: { snapshot: BankSnapshot; p
           <span className="wallet-unit" aria-hidden="true">点</span>
           <span className="sr-only" aria-live="polite">現在の得点 {balance}点</span>
         </div>
-        {run?.playing && <strong className="payment-delta" lang="en">{deposit ? '+' : '−'}{run.transaction.amount} POINTS</strong>}
+        {run?.playing && (returning
+          ? <strong className="payment-delta">お釣り ＋{outgoing === undefined ? 0 : outgoing - run.transaction.amount}点</strong>
+          : <strong className="payment-delta" lang="en">{deposit ? '+' : '−'}{outgoing} POINTS</strong>)}
       </div>
-      <div className="wallet-tray">
+      <div className="wallet-tray" ref={tray} data-compression={compression?.cue ?? 'idle'}>
         <CoinGroups wallet={wallet} renderCoin={coin => {
           const flying = Boolean(run && !run.reduced && run.flights.has(coin.id));
           const chosen = reserved.has(coin.id);
           const lifted = chosen && Boolean(run?.reached.has('lift'));
-          const landed = deposit && Boolean(run?.playing && run.received.has(coin.id));
+          const landed = incoming.some(item => item.id === coin.id) && Boolean(run?.playing && run.received.has(coin.id));
+          const merging = gatheringIds.has(coin.id);
+          const justMinted = minted === coin.id;
           return (
-            <div className="coin-anchor" data-coin-id={coin.id} data-coin-value={coin.value} data-in-flight={flying} data-chosen={chosen} data-lifted={lifted} data-landed={landed} key={coin.id}>
+            <div className="coin-anchor" data-coin-id={coin.id} data-coin-value={coin.value} data-in-flight={flying} data-chosen={chosen} data-lifted={lifted} data-landed={landed} data-merge={merging} data-merge-hidden={merging && animateMerge}
+              data-minted={justMinted} key={coin.id}>
               <span className="coin-in-tray"><GoldCoin coin={coin} /></span>
-              {landed && <i className="tray-receipt" />}
+              {(landed || justMinted) && <i className="tray-receipt" />}
             </div>
           );
         }} />
         {run && arrivals.map(({ coin, index }) => {
-          const futureWallet = [...wallet, ...run.payment.slice(0, index + 1).filter(item => !run.received.has(item.id))];
+          const futureWallet = [...wallet, ...incoming.slice(0, index + 1).filter(item => !run.received.has(item.id))];
           return (
             <div className="tray-projection" aria-hidden="true" key={coin.id}>
               <CoinGroups wallet={futureWallet} renderCoin={item => (
@@ -102,6 +117,7 @@ export function PlayerTray({ snapshot, playerName }: { snapshot: BankSnapshot; p
             </div>
           );
         })}
+        {gathering && animateMerge && <CoinMerger key={gathering.output.id} tray={tray} step={gathering} />}
       </div>
     </section>
   );

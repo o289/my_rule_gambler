@@ -1,10 +1,10 @@
 import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
 import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
-import type { BankPlayer } from '../application/bank-player';
+import type { BankPlayer, BankSnapshot } from '../application/bank-player';
 import type { BankActions } from '../application/bank-api';
-import { BANK_AMOUNT_STEP, bankBalance, DEFAULT_BANK_AMOUNT, selectPayment, VAULT_DOOR_MS } from '../model/bank-model';
-import type { BankCue, BankDirection, Coin } from '../model/bank-model';
+import { BANK_AMOUNT_STEP, bankBalance, canCompress, DEFAULT_BANK_AMOUNT, selectExchange, selectPayment, VAULT_DOOR_MS } from '../model/bank-model';
+import type { BankCue, BankDirection, BankTransaction, Coin } from '../model/bank-model';
 import { CoinFlights } from './coin-flight';
 import { PlayerTray } from './tray';
 import { Vault } from './vault';
@@ -24,6 +24,9 @@ const STAGE_STATUS: Record<BankCue, string> = {
   close: '金庫を閉めています',
   lock: '金庫施錠',
   finish: '回収完了',
+  change: 'お釣りを返しています',
+  merge: '金貨をまとめています',
+  mint: '金貨を交換しました',
 };
 
 const MODES = {
@@ -31,7 +34,19 @@ const MODES = {
   deposit: { label: '受け取り', intro: '金庫から届く金貨を、手元のトレーへ。', action: '点受け取る', result: '受け取り完了' },
 } satisfies Record<BankDirection, { label: string; intro: string; action: string; result: string }>;
 
-function stageStatus(cue: BankCue, mode: BankDirection) {
+function stageStatus({ run, mode, balance, compression }: BankSnapshot) {
+  const step = compression?.steps[compression.index];
+  const input = step?.inputs[0];
+  if (compression?.playing && step && input) return `${input.value}点金貨 ${step.inputs.length}枚 → ${step.output.value}点金貨 1枚`;
+  if (compression?.manual) return `圧縮完了 · ${balance}点`;
+  if (!run) return `${MODES[mode].label}を開始できます`;
+  if (!run.playing) {
+    return run.change.length
+      ? `−${run.transaction.amount}点 · お釣り ＋${bankBalance(run.change)}点`
+      : `${run.transaction.amount}点の${MODES[mode].result}`;
+  }
+  const { cue } = run;
+  if (run.reached.has('change') && !run.reached.has('close')) return `お釣り ＋${bankBalance(run.change)}点を返しています`;
   if (mode === 'deposit') {
     if (cue === 'confirm') return '受け取り確定';
     if (cue === 'lift') return '金庫からコインを送り出します';
@@ -49,7 +64,8 @@ function summarize(coins: readonly Coin[]) {
 function App({ bank, audio, api, demo }: BankScreenProps) {
   useAudioActivation(audio.unlock);
   const snapshot = useSyncExternalStore(bank.subscribe, bank.getSnapshot);
-  const { run, mode } = snapshot;
+  const { run, mode, compression } = snapshot;
+  const busy = Boolean(run?.playing || compression?.playing);
   const selected = MODES[mode];
   const [amount, setAmount] = useState(String(DEFAULT_BANK_AMOUNT));
   const activeAmount = run?.playing ? String(run.transaction.amount) : amount;
@@ -57,7 +73,7 @@ function App({ bank, audio, api, demo }: BankScreenProps) {
   const startingCoins = mode === 'withdraw' ? demo.initialWallet : demo.initialReserve;
   const source = run ? startingCoins : mode === 'withdraw' ? snapshot.wallet : snapshot.reserve;
   const limit = bankBalance(source);
-  const completedAmount = run && !run.playing ? run.transaction.amount : null;
+  const completedAmount = run && !run.playing && run.transaction.tender === undefined ? run.transaction.amount : null;
   const stage = useRef<HTMLDivElement>(null);
   const { plannedCoins, amountError } = useMemo(() => {
     try {
@@ -67,7 +83,17 @@ function App({ bank, audio, api, demo }: BankScreenProps) {
     }
   }, [source, points]);
   const plan = run?.playing ? run.payment : plannedCoins;
-  const canPay = !run?.playing && !amountError && completedAmount !== points;
+  const canPay = !busy && !amountError && completedAmount !== points;
+  const changeExample = useMemo<BankTransaction | null>(() => {
+    const example = { type: 'withdraw', playerId: demo.playerId, amount: 70, tender: 100 } as const;
+    try {
+      selectExchange(demo.initialWallet, demo.initialReserve, example);
+      return example;
+    } catch (error) {
+      if (error instanceof RangeError) return null;
+      throw error;
+    }
+  }, [demo]);
   const style: CSSProperties & { '--door-ms': string; '--run-ms': string } = {
     '--door-ms': `${VAULT_DOOR_MS}ms`, '--run-ms': `${run?.duration ?? 0}ms`,
   };
@@ -82,16 +108,23 @@ function App({ bank, audio, api, demo }: BankScreenProps) {
   function pay(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const current = bank.getSnapshot();
-    if (!canPay || current.mode !== mode || current.run?.playing || current.run?.transaction.amount === points) return;
+    if (!canPay || current.mode !== mode || current.run?.playing || current.compression?.playing
+      || (current.run?.transaction.tender === undefined && current.run?.transaction.amount === points)) return;
     if (current.run) api.reset();
     if (api.playBankTransaction({ type: mode, playerId: demo.playerId, amount: points })) showStage();
   }
 
   function replay() {
-    if (!run) return;
-    setAmount(String(run.transaction.amount));
-    showStage();
-    api.replay();
+    if (run && !compression?.manual) setAmount(String(run.transaction.amount));
+    if (api.replay()) showStage();
+  }
+
+  function payWithChange() {
+    const current = bank.getSnapshot();
+    if (!changeExample || current.run?.playing || current.compression?.playing) return;
+    api.reset();
+    setAmount(String(changeExample.amount));
+    if (api.playBankTransaction(changeExample)) showStage();
   }
 
   return (
@@ -111,19 +144,19 @@ function App({ bank, audio, api, demo }: BankScreenProps) {
       </div>
       <div className="bank-layout">
         <section className="bank-cabinet" aria-label="銀行とプレイヤートレー" style={style}>
-          <div className="bank-stage" ref={stage} data-cue={run?.cue ?? 'idle'} data-direction={mode} data-playing={Boolean(run?.playing)}>
+          <div className="bank-stage" ref={stage} data-cue={compression?.playing ? compression.cue : run?.cue ?? 'idle'} data-direction={mode} data-playing={busy}>
             <div className="bank-matte" aria-hidden="true"><i /><i /><i /><i /></div>
             <Vault key={`vault-${run?.id ?? 'idle'}`} run={run} />
             <PlayerTray key={`tray-${run?.id ?? 'idle'}`} snapshot={snapshot} playerName={demo.playerName} />
-            {run && !run.reduced && <CoinFlights stage={stage} flights={run.flights} direction={run.transaction.type} />}
+            {run && !run.reduced && <CoinFlights stage={stage} flights={run.flights} />}
           </div>
           <div className="bank-footer">
             {run && <div className="progress-track" aria-hidden="true"><div key={run.id} className="progress-amount" data-running={run.playing} /></div>}
             <div className="bank-readout">
               <span>取引状況</span>
-              <strong aria-live="polite">{run?.playing ? stageStatus(run.cue, mode) : run ? `${run.transaction.amount}点の${selected.result}` : `${selected.label}を開始できます`}</strong>
+              <strong aria-live="polite">{stageStatus(snapshot)}</strong>
             </div>
-            <button type="button" className="quiet-button" id="skip-payment" onClick={api.skip} disabled={!run?.playing}>演出スキップ</button>
+            <button type="button" className="quiet-button" id="skip-payment" onClick={api.skip} disabled={!busy}>演出スキップ</button>
           </div>
         </section>
 
@@ -143,7 +176,7 @@ function App({ bank, audio, api, demo }: BankScreenProps) {
               <label htmlFor="bank-amount">取引額</label>
               <div className="bank-amount-field">
                 <input id="bank-amount" type="number" inputMode="numeric" min={BANK_AMOUNT_STEP} max={limit} step={BANK_AMOUNT_STEP}
-                  value={activeAmount} disabled={Boolean(run?.playing)} aria-invalid={Boolean(amountError)}
+                  value={activeAmount} disabled={busy} aria-invalid={Boolean(amountError)}
                   aria-describedby="bank-amount-note" onChange={event => setAmount(event.currentTarget.value)} />
                 <span aria-hidden="true">点</span>
               </div>
@@ -154,13 +187,21 @@ function App({ bank, audio, api, demo }: BankScreenProps) {
             <div className="payment-summary" data-direction={mode}>
               <span className="payment-summary-label">コインの内訳</span>
               <span aria-live="polite">{plan.length ? summarize(plan) : '—'}</span>
+              {run?.playing && run.change.length > 0 && <span>お釣り　{summarize(run.change)}</span>}
             </div>
             <button type="submit" id="pay-button" className="pay-button" disabled={!canPay}>{amountError ? selected.label : `${points}${selected.action}`}</button>
-            {canPay && completedAmount !== null && <p className="bank-amount-note">次の取引は初期残高から開始します。</p>}
+            {canPay && Boolean(run) && <p className="bank-amount-note">次の取引は初期残高から開始します。</p>}
           </form>
           <div className="reset-actions">
-            <button type="button" className="quiet-button" id="replay-payment" disabled={!run} onClick={replay}>もう一度再生</button>
+            <button type="button" className="quiet-button" id="replay-payment" disabled={!run && !compression} onClick={replay}>もう一度再生</button>
             <button type="button" className="quiet-button" id="reset-payment" onClick={api.reset}>リセット</button>
+          </div>
+          <div className="bank-extra-actions">
+            <button type="button" className="quiet-button" id="change-demo" disabled={busy || !changeExample} onClick={payWithChange}>
+              70点を100点金貨で支払う
+            </button>
+            <button type="button" className="quiet-button" id="compress-coins" disabled={busy || !canCompress(snapshot.wallet)}
+              onClick={() => { if (api.compress()) showStage(); }}>金貨を圧縮</button>
           </div>
         </aside>
       </div>

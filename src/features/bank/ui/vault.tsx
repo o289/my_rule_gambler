@@ -19,6 +19,7 @@ function vaultState(run: BankRun | null) {
   if (!run?.playing) return '施錠中';
   if (run.reached.has('lock')) return '施錠中';
   if (run.reached.has('close')) return '閉鎖中';
+  if (run.reached.has('change')) return 'お釣り送出中';
   if (run.reached.has('launch')) return run.transaction.type === 'deposit' ? 'コイン送出中' : 'コイン回収中';
   if (run.reached.has('open')) return '開放中';
   if (run.reached.has('unlock')) return '解錠中';
@@ -31,7 +32,7 @@ export function Vault({ run }: { run: BankRun | null }) {
   const unlocked = Boolean(run?.playing && run.reached.has('unlock') && !run.reached.has('lock'));
   const energized = Boolean(run?.playing && run.reached.has('wake') && !run.reached.has('lock'));
 
-  const pulse = run?.transaction.type === 'deposit' ? [...run.flights.values()].at(-1)?.coin : run?.lastReceipt;
+  const pulse = run?.transaction.type === 'deposit' || run?.reached.has('change') ? [...run.flights.values()].filter(flight => flight.direction === 'deposit').at(-1)?.coin : run?.lastReceipt;
 
   return (
     <>

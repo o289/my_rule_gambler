@@ -1,7 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 import type { RefObject } from 'react';
 import { COIN_TRAVEL_MS } from '../model/bank-model';
-import type { BankDirection } from '../model/bank-model';
 import type { Flight } from '../application/bank-player';
 import { GoldCoin } from './coin';
 
@@ -37,7 +36,7 @@ function easeFlight(progress: number) {
   return progress * progress * (3 - 2 * progress);
 }
 
-export function CoinFlights({ flights, stage, direction }: { flights: ReadonlyMap<string, Flight>; stage: RefObject<HTMLDivElement | null>; direction: BankDirection }) {
+export function CoinFlights({ flights, stage }: { flights: ReadonlyMap<string, Flight>; stage: RefObject<HTMLDivElement | null> }) {
   const trails = useRef<HTMLCanvasElement>(null);
   const shells = useRef(new Map<string, HTMLDivElement>());
   const rotors = useRef(new Map<string, HTMLSpanElement>());
@@ -47,7 +46,6 @@ export function CoinFlights({ flights, stage, direction }: { flights: ReadonlyMa
     const canvas = trails.current;
     if (!scene || !canvas || !flights.size) return;
     const context = canvas.getContext('2d');
-    const deposit = direction === 'deposit';
     const points = new Map<string, Path>();
     const actors = new Map<string, FlyingNodes>();
     let width = 0;
@@ -67,6 +65,7 @@ export function CoinFlights({ flights, stage, direction }: { flights: ReadonlyMa
       context?.setTransform(ratio, 0, 0, ratio, 0, 0);
       const target = localCenter(available.getBoundingClientRect(), boundary);
       for (const [id, flight] of flights) {
+        const deposit = flight.direction === 'deposit';
         const selector = deposit
           ? `[data-flight-target="${CSS.escape(id)}"]`
           : `[data-coin-id="${CSS.escape(id)}"] .coin-in-tray`;
@@ -124,6 +123,7 @@ export function CoinFlights({ flights, stage, direction }: { flights: ReadonlyMa
         const path = points.get(id);
         const node = actors.get(id);
         if (!path || !node) continue;
+        const deposit = flight.direction === 'deposit';
         const progress = Math.max(0, Math.min(1, (now - flight.startedAt) / COIN_TRAVEL_MS));
         const eased = easeFlight(progress);
         const position = pointAlong(path, eased);
@@ -160,14 +160,14 @@ export function CoinFlights({ flights, stage, direction }: { flights: ReadonlyMa
       window.removeEventListener('resize', resize);
       cancelAnimationFrame(frame);
     };
-  }, [flights, stage, direction]);
+  }, [flights, stage]);
 
   if (!flights.size) return null;
   return (
     <div className="flight-layer" aria-hidden="true">
       <canvas ref={trails} />
-      {[...flights.values()].map(({ coin }) => (
-        <div className="flying-coin" data-flying-coin={coin.id} data-coin-value={coin.value} key={coin.id} ref={element => {
+      {[...flights.values()].map(({ coin, direction }) => (
+        <div className="flying-coin" data-flying-coin={coin.id} data-coin-value={coin.value} data-flight-direction={direction} key={coin.id} ref={element => {
           if (element) shells.current.set(coin.id, element);
           else shells.current.delete(coin.id);
         }}>

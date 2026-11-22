@@ -417,7 +417,7 @@ button:disabled { cursor: default; }
   background: radial-gradient(ellipse at 50% 53%, #671f18c9, #341511eb 77%), var(--marble) center / cover;
 }
 
-.player-area[data-direction="deposit"][data-paying="true"] .wallet-score {
+.player-area:is([data-direction="deposit"], [data-incoming="true"])[data-paying="true"] .wallet-score {
   border-color: #d49c59;
   box-shadow: inset 0 0 24px #a570295c, 0 0 20px #e2a44e43, 0 5px 14px #070303d0;
   background: radial-gradient(ellipse at 50% 53%, #78501fc9, #301d12eb 77%), var(--marble) center / cover;
@@ -458,7 +458,7 @@ button:disabled { cursor: default; }
   white-space: nowrap;
 }
 
-.player-area[data-direction="deposit"] .payment-delta {
+.player-area:is([data-direction="deposit"], [data-incoming="true"]) .payment-delta {
   color: #ffe0a5;
   text-shadow: 0 0 9px #e3a03d;
 }
@@ -554,8 +554,8 @@ button:disabled { cursor: default; }
 
 .coin-anchor[data-in-flight="true"]::before { visibility: hidden; }
 
-.coin-anchor[data-landed="true"] .coin-in-tray { animation: tray-land 345ms cubic-bezier(.18,.67,.27,1); }
-.coin-anchor[data-landed="true"] { z-index: 2; }
+.coin-anchor:is([data-landed="true"], [data-minted="true"]) .coin-in-tray { animation: tray-land 345ms cubic-bezier(.18,.67,.27,1); }
+.coin-anchor:is([data-landed="true"], [data-minted="true"]) { z-index: 2; }
 
 .tray-receipt {
   position: absolute;
@@ -593,7 +593,40 @@ button:disabled { cursor: default; }
 .coin-anchor[data-chosen="true"] { z-index: 2; }
 .coin-anchor[data-chosen="true"] .coin-in-tray { filter: drop-shadow(0 0 8px #ffd482b0); }
 .coin-anchor[data-lifted="true"] .coin-in-tray { transform: translateY(-15px); }
-.coin-anchor[data-in-flight="true"] .coin-in-tray { visibility: hidden; }
+.coin-anchor:is([data-in-flight="true"], [data-merge-hidden="true"]) .coin-in-tray { visibility: hidden; }
+.coin-anchor[data-merge="true"] .coin-in-tray { filter: drop-shadow(0 0 7px #e9ba65ab); }
+.coin-anchor[data-merge-hidden="true"]::before { visibility: hidden; }
+
+.coin-merger {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  pointer-events: none;
+}
+.coin-merge-actor {
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0;
+  filter: drop-shadow(0 1px 8px #f3a84998);
+  will-change: transform, opacity;
+}
+.coin-merge-actor .coin-solid { transform: rotateX(24deg) rotateY(-7deg); }
+.coin-merge-halo {
+  position: absolute;
+  left: 50%;
+  top: 12%;
+  width: min(40%, 172px);
+  height: 76%;
+  border-radius: 50%;
+  background: radial-gradient(ellipse, #fff0bd9e, #e8a24353 42%, transparent 71%);
+  animation: merge-halo 670ms ease-out both;
+}
+@keyframes merge-halo {
+  from { transform: translate(-50%, -50%) scale(.4); opacity: .03; }
+  76% { opacity: .72; }
+  to { transform: translate(-50%, -50%) scale(1.18); opacity: 0; }
+}
 
 .coin-shell {
   position: relative;
@@ -847,6 +880,14 @@ button:disabled { cursor: default; }
 
 .reset-actions { display: grid; grid-template-columns: 1.1fr 1fr; gap: 7px; margin-top: 8px; }
 
+.bank-extra-actions {
+  display: grid;
+  gap: 7px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid #745035;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -919,7 +960,7 @@ button:disabled { cursor: default; }
   .door-slab, .vault-wheel, .vault-light-spill, .vault-rim-light, .vault-tunnel-light, .coin-in-tray, .wallet-score { transition: none; }
   .coin-anchor[data-lifted="true"] .coin-in-tray { transform: none; }
   .flight-layer { display: none; }
-  .coin-anchor[data-landed="true"] .coin-in-tray, .tray-receipt { animation: none; }
+  .coin-anchor:is([data-landed="true"], [data-minted="true"]) .coin-in-tray, .tray-receipt { animation: none; }
   .tray-receipt { opacity: .32; }
   .receipt-wave, .receipt-core { animation: none; opacity: .24; }
   .progress-amount[data-running="true"] { animation: none; opacity: .4; }
