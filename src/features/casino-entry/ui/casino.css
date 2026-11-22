@@ -1,0 +1,510 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, "Hiragino Sans", "Yu Gothic", sans-serif;
+  background: #100b08;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; min-height: 100%; }
+button { font-family: inherit; }
+
+.casino-flow {
+  --casino-serif: Georgia, "Times New Roman", serif;
+  --casino-gold: #dbb174;
+  --casino-pale: #ffe7b8;
+}
+
+.casino-entrance {
+  position: fixed;
+  z-index: 4;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.casino-hinge {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  perspective: 1150px;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+
+.casino-door {
+  width: 50%;
+  height: 100%;
+  flex: none;
+  backface-visibility: hidden;
+  background: #1c130e url('../../../shared/assets/casino-entry/casino-doors.webp') 0 center / max(100vw, 177.778dvh) auto no-repeat;
+  box-shadow: inset 0 0 28px 2px #0009;
+  transform: rotateY(0);
+  transition: transform 1.08s cubic-bezier(.5, .055, .17, 1);
+}
+
+.casino-door--left {
+  transform-origin: left center;
+  background-position-x: min(0px, (100vw - 177.778dvh) / 2);
+}
+.casino-door--right {
+  transform-origin: right center;
+  background-position-x: calc(min(0px, (100vw - 177.778dvh) / 2) - 50vw);
+}
+.casino-entrance[data-opening="true"] .casino-door--left { transform: rotateY(108deg); }
+.casino-entrance[data-opening="true"] .casino-door--right { transform: rotateY(-108deg); }
+
+.casino-entrance-ui {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--casino-pale);
+  pointer-events: none;
+  background: radial-gradient(ellipse at 50% 43%, #08050433 0, transparent 44%, #02010144 91%);
+  transition: opacity .27s ease;
+}
+.casino-entrance[data-opening="true"] .casino-entrance-ui { opacity: 0; }
+.casino-entrance-ui button { pointer-events: auto; }
+
+.casino-lockup {
+  display: grid;
+  justify-items: center;
+  transform: translateY(-6dvh);
+  width: min(100% - 28px, 795px);
+}
+.casino-crest {
+  width: clamp(32px, 5.1vw, 65px);
+  height: auto;
+  color: #f2c688;
+  margin-bottom: 15px;
+  filter: drop-shadow(0 1px 5px #000);
+}
+.casino-lockup h1 {
+  margin: 0;
+  padding-inline: .2em 0;
+  font: 600 clamp(2.05rem, 7.8vw, 7.2rem)/.96 var(--casino-serif);
+  letter-spacing: .2em;
+  color: var(--casino-pale);
+  background: linear-gradient(173deg, #fff8d9 4%, #ebbd73 25%, #ad7137 52%, #fcdb97 64%, #b57642 87%, #f5daa5 97%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  filter: drop-shadow(0 1px #311609) drop-shadow(0 2px 6px #000);
+}
+.casino-gems {
+  display: flex;
+  align-items: center;
+  gap: clamp(6px, 1.2vw, 17px);
+  margin-top: clamp(17px, 3vw, 33px);
+  padding: 7px 14px;
+  border-block: 1px solid #d9a05941;
+  background: #0f0806c2;
+  box-shadow: 0 3px 17px #0008, inset 0 0 17px #9c653c1d;
+}
+.casino-gems img {
+  width: clamp(27px, 4vw, 57px);
+  aspect-ratio: 1;
+  object-fit: contain;
+  filter: drop-shadow(0 2px 4px #000);
+}
+
+.casino-entrance-controls {
+  position: absolute;
+  inset-inline: 0;
+  bottom: max(9.3dvh, 65px);
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  text-align: center;
+}
+.casino-action {
+  position: relative;
+  display: inline-grid;
+  min-height: 47px;
+  min-width: min(210px, 75vw);
+  place-items: center;
+  padding: 9px 25px;
+  border: 1px solid #f6d498;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #352315, #130c07 56%, #312015);
+  color: var(--casino-pale);
+  box-shadow: inset 0 0 0 3px #25160f, inset 0 0 0 4px #91623d, 0 4px 15px #000b;
+  font: 700 .89rem/1.35 var(--casino-serif);
+  letter-spacing: .19em;
+  cursor: pointer;
+  transition: background-color .2s, box-shadow .2s, color .2s;
+}
+.casino-action:hover:not(:disabled) {
+  color: #fffaef;
+  box-shadow: inset 0 0 0 3px #33231b, inset 0 0 0 4px #f1b779, 0 4px 26px #f6ae6440;
+}
+.casino-action:focus-visible, .casino-plain:focus-visible {
+  outline: 2px solid #fff0c9;
+  outline-offset: 4px;
+}
+.casino-action:disabled { opacity: .5; cursor: default; }
+.casino-enter {
+  min-width: 229px;
+  min-height: 57px;
+  color: #2a1709;
+  border-color: #ffe4ad;
+  font-size: 1.02rem;
+  background: linear-gradient(180deg, #fff0bd 0%, #d59c56 48%, #ffdb95 50%, #c5864b 100%);
+  box-shadow: inset 0 0 0 3px #3f2417, inset 0 0 0 4px #e3b97d, 0 5px 29px #000;
+}
+.casino-enter:hover:not(:disabled) {
+  color: #281307;
+  background: linear-gradient(180deg, #fffbe5, #dfa76b 48%, #ffe1a3 51%, #d29453);
+}
+.entrance-completion, .casino-load-error p {
+  margin: 0;
+  color: #ffe0af;
+  font-size: .75rem;
+  text-shadow: 0 2px 4px #000, 0 1px 8px #000;
+}
+.entrance-completion span { margin-inline-start: .36em; font-variant-numeric: tabular-nums; }
+.casino-plain {
+  min-height: 44px;
+  padding: 4px 9px;
+  background: #0e0906e6;
+  border: 1px solid #8d653e;
+  border-radius: 2px;
+  color: #f5d4a6;
+  font-size: .72rem;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.casino-plain:hover { border-color: #f0ce9b; color: #ffefce; }
+.entrance-sound { position: absolute; bottom: max(env(safe-area-inset-bottom), 15px); right: 18px; }
+.casino-progress, .casino-load-error {
+  width: min(350px, 100% - 36px);
+  padding: 13px 15px;
+  background: #0b0706ec;
+  border: 1px solid #b58c5b9c;
+  box-shadow: 0 3px 22px #0009;
+}
+.casino-progress > div { display: flex; justify-content: space-between; gap: 12px; color: #f7d79f; font-size: .79rem; }
+.casino-progress progress {
+  display: block;
+  width: 100%;
+  height: 7px;
+  appearance: none;
+  border: 0;
+  border-radius: 2px;
+  margin-top: 9px;
+  overflow: hidden;
+  color: #d8a260;
+  background: #2b1b13;
+  accent-color: #e7b575;
+}
+.casino-progress progress::-webkit-progress-bar { background: #2b1b13; }
+.casino-progress progress::-webkit-progress-value { background: linear-gradient(90deg, #9d6436, #ffd89d); transition: width .16s; }
+.casino-progress progress::-moz-progress-bar { background: linear-gradient(90deg, #9d6436, #ffd89d); }
+.casino-load-error { display: grid; justify-items: center; gap: 11px; }
+
+.vip-lobby {
+  min-height: 100dvh;
+  display: grid;
+  padding: clamp(14px, 4dvh, 42px) 14px;
+  place-items: center;
+  color: var(--casino-pale);
+  background: linear-gradient(180deg, #10090540, #0b060550 55%, #0b0605af),
+    #160f0c url('../../../shared/assets/casino-entry/casino-lounge.webp') center / cover no-repeat;
+}
+.vip-panel {
+  width: min(810px, 100%);
+  position: relative;
+  isolation: isolate;
+  padding: 22px clamp(12px, 4.05vw, 50px) 25px;
+  border: 1px solid #ae8556;
+  outline: 1px solid #7250327d;
+  outline-offset: -6px;
+  margin-inline: auto;
+  background: radial-gradient(ellipse at 50% 45%, #2a1e1600, #130b07ce 87%), #110c09d6;
+  box-shadow: 0 19px 55px #000a, inset 0 0 38px #100b07;
+}
+.vip-completion {
+  max-width: 430px;
+  display: grid;
+  justify-items: center;
+  gap: 22px;
+  padding-block: 33px;
+}
+
+.vip-panel::before, .vip-panel::after {
+  content: '';
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+  border: 1px solid #ebc58c;
+}
+.vip-panel::before { top: 5px; left: 5px; border-right: 0; border-bottom: 0; }
+.vip-panel::after { bottom: 5px; right: 5px; border-left: 0; border-top: 0; }
+.vip-heading {
+  display: grid;
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, 3fr) minmax(max-content, 1fr);
+  align-items: start;
+  justify-items: center;
+  gap: 5px;
+  border-bottom: 1px solid #986b4459;
+  padding-bottom: 16px;
+}
+.vip-exit { justify-self: start; }
+.vip-sound { justify-self: end; }
+.vip-title { text-align: center; min-width: 0; }
+.vip-crown { display: block; margin: 0 auto 7px; width: 35px; color: #d8ab72; }
+.vip-title h1 {
+  font: 600 clamp(1.4rem, 4.65vw, 3rem)/1 var(--casino-serif);
+  letter-spacing: .125em;
+  margin: 0;
+  color: #fbdca6;
+  outline: none;
+  text-shadow: 0 3px 12px #000;
+}
+.vip-room {
+  margin: 9px 0 0;
+  color: #c5a887;
+  font-size: .63rem;
+  letter-spacing: .18em;
+  overflow-wrap: anywhere;
+}
+.vip-room strong { color: #f2c48b; margin-inline-start: 3px; }
+
+.vip-table-layout {
+  display: grid;
+  grid-template-columns: minmax(75px, 17%) minmax(0, 1fr) minmax(75px, 17%);
+  grid-template-rows: repeat(3, 93px);
+  align-items: center;
+  gap: 3px 12px;
+  margin-block: 16px 11px;
+}
+.vip-seat[data-slot="1"] { grid-area: 1 / 1; }
+.vip-seat[data-slot="2"] { grid-area: 1 / 3; }
+.vip-seat[data-slot="3"] { grid-area: 2 / 1; }
+.vip-seat[data-slot="4"] { grid-area: 2 / 3; }
+.vip-seat[data-slot="5"] { grid-area: 3 / 1; }
+.vip-seat[data-slot="6"] { grid-area: 3 / 3; }
+.vip-seat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  align-self: center;
+  min-height: 91px;
+  min-width: 0;
+  text-align: center;
+}
+.vip-seat-marker {
+  display: grid;
+  place-items: center;
+  margin-bottom: 2px;
+  width: 47px;
+  height: 47px;
+  border-radius: 50%;
+  border: 1px dashed #a57c5299;
+  background: #100c0a;
+  box-shadow: 0 2px 7px #0008;
+  transition: box-shadow .28s, border-color .28s;
+}
+.vip-seat[data-seat="here"] .vip-seat-marker, .vip-seat[data-seat="ready"] .vip-seat-marker { border-style: solid; border-color: #b0824d; }
+.vip-seat[data-seat="ready"] .vip-seat-marker { border-color: #83f5b9; box-shadow: 0 0 0 3px #257955, 0 0 15px #2bdb8e6e; }
+.vip-seat-name {
+  display: block;
+  width: 100%;
+  color: #fff0d6;
+  font: 600 .7rem/1.22 var(--casino-serif);
+  letter-spacing: .05em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.vip-seat[data-seat="empty"] .vip-seat-name, .vip-seat[data-seat="offline"] .vip-seat-name { color: #bdab92; }
+.empty-seat-number {
+  color: #b09875;
+  font: 400 .72rem/1 var(--casino-serif);
+  font-variant-numeric: tabular-nums;
+}
+.vip-seat-status { font-size: .65rem; color: #c6a988; line-height: 1.14; }
+.vip-seat[data-seat="ready"] .vip-seat-status { color: #a5f8c9; font-weight: 750; letter-spacing: .13em; }
+.vip-seat-tags { display: flex; gap: 2px; }
+.vip-seat-tags > span {
+  color: #f9dcaa;
+  background: #3a2720;
+  border: 1px solid #735238;
+  border-radius: 2px;
+  padding: 1px 3px;
+  font: 600 .53rem/1 var(--casino-serif);
+  letter-spacing: .13em;
+}
+.vip-seat-chip {
+  display: grid;
+  place-items: center;
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border: 1px solid #ffdb9d;
+  border-radius: 50%;
+  background: radial-gradient(circle at 32% 18%, #f6d79c, #ac7543 57%, #53321c 94%);
+  box-shadow: inset 0 0 0 2px #321c13, inset 0 0 0 3px #b57946, 0 2px 2px #090504;
+  animation: vip-token-drop .48s cubic-bezier(.22,.63,.39,1) both;
+}
+.vip-seat-chip > span {
+  display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border: 1px dotted #f6cc8c;
+  border-radius: 50%;
+  color: #ffe4ab;
+  background: linear-gradient(147deg, #503327, #26150f 55%, #584029);
+  font: 700 1.22rem/1 var(--casino-serif);
+}
+@keyframes vip-token-drop {
+  0% { transform: translateY(-16px) rotateX(35deg) scale(.84); opacity: .2; }
+  67% { transform: translateY(1px) rotateX(0) scale(1.03); opacity: 1; }
+  85% { transform: translateY(-2px); }
+  100% { transform: translateY(0); }
+}
+
+.vip-table {
+  grid-area: 1 / 2 / 4 / 3;
+  width: 100%;
+  aspect-ratio: 1.87;
+  border-radius: 46% / 54%;
+  padding: 9px;
+  background: linear-gradient(160deg, #dbb481 2%, #6b4328 22%, #261b18 49%, #a66f43 78%, #e1bd85 95%);
+  border: 1px solid #f0c892;
+  box-shadow: inset 0 0 0 2px #24150e, 0 9px 18px #000a, 0 3px 0 3px #26160f;
+}
+.vip-felt {
+  border-radius: inherit;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  isolation: isolate;
+  border: 1px solid #54412a;
+  background:
+    repeating-conic-gradient(#10262310 0 25%, #acbabe0d 0 50%) 0 0 / 3px 3px,
+    radial-gradient(ellipse at 44% 28%, #315c46, #1c412f 49%, #0f261c 89%);
+  box-shadow: inset 0 2px 20px #020805, inset 0 0 0 3px #0c1d17c9;
+}
+.vip-felt::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: 10%;
+  border-radius: inherit;
+  border: 1px solid #b7aa6970;
+  box-shadow: inset 0 0 0 3px #153122, inset 0 0 0 4px #b7aa6933;
+}
+.vip-table-mark {
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  color: #d0c188a6;
+  font: 600 clamp(.62rem, 1.8vw, 1.42rem)/1 var(--casino-serif);
+  letter-spacing: .22em;
+  text-shadow: 0 1px #172a1f;
+}
+.table-crown { width: clamp(22px, 5vw, 47px); height: auto; }
+
+.countdown-disc {
+  width: 100%;
+  display: grid;
+  place-items: center;
+  position: absolute;
+}
+.countdown-disc[data-exiting="true"] { animation: countdown-close .205s ease-in both; }
+@keyframes countdown-close { to { opacity: 0; transform: scale(.62) rotateX(-35deg); } }
+.countdown-chip {
+  width: clamp(79px, 14vw, 128px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  color: #ffe7a7;
+  border-radius: 50%;
+  padding: clamp(6px, 1.25vw, 11px);
+  font: 700 clamp(2.45rem, 6vw, 5rem)/.8 var(--casino-serif);
+  background: repeating-conic-gradient(from 5deg, #e1b679 0 7deg, #63401f 7deg 14deg, #d59c59 14deg 20deg),
+    radial-gradient(circle, #f2c271, #7a462b);
+  border: 2px solid #f1cc91;
+  box-shadow: 0 4px 0 #6a4328, inset 0 0 0 4px #27180ec4, inset 0 0 0 5px #fadd9e, 0 7px 34px #d7a52c64;
+  animation: countdown-seat .26s cubic-bezier(.15,.6,.26,1) both;
+}
+.countdown-chip > span {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  color: #fff0bf;
+  text-shadow: 0 1px #7c421d, 0 3px 4px #140904;
+  background: radial-gradient(circle at 45% 28%, #a57343, #5a2e19 67%, #2b170e);
+  border: 1px solid #ffdd99;
+  box-shadow: inset 0 0 0 3px #482817, inset 0 0 0 4px #ca955b;
+}
+@keyframes countdown-seat {
+  from { opacity: .2; transform: translateY(-9px) rotateX(22deg) scale(1.17); }
+  to { opacity: 1; transform: none; }
+}
+
+.vip-controls { display: grid; gap: 9px; justify-items: center; text-align: center; }
+.vip-totals { display: flex; gap: 10px; align-items: center; color: #eecb99; font-size: .76rem; font-variant-numeric: tabular-nums; }
+.vip-totals i { width: 4px; height: 4px; transform: rotate(45deg); background: #9c6b44; }
+.vip-status { margin: 0; color: #dac2a3; min-height: 1.3em; font-size: .72rem; }
+#ready-toggle[aria-pressed="true"] {
+  color: #b6ffce;
+  border-color: #77d8a9;
+  background: linear-gradient(#214a39, #10231c 57%, #173c2c);
+  box-shadow: inset 0 0 0 3px #10261e, inset 0 0 0 4px #4a916d, 0 4px 15px #000a;
+}
+
+@media (max-width: 585px) {
+  .casino-door--left { border-left: 1px solid #ab784e91; }
+  .casino-door--right { border-right: 1px solid #ab784e91; }
+  .casino-lockup h1 { font-size: clamp(2.03rem, 9.5vw, 3.6rem); letter-spacing: .15em; }
+  .casino-enter { min-width: 182px; min-height: 52px; }
+  .vip-lobby { padding: 10px max(8px, env(safe-area-inset-left)); }
+  .vip-panel { padding: 15px 12px 16px; }
+  .vip-heading { padding-bottom: 12px; }
+  .vip-table-layout {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-rows: 79px auto 79px;
+    gap: 7px 5px;
+    margin-block: 12px 10px;
+  }
+  .vip-seat { min-height: 77px; }
+  .vip-seat[data-slot="1"] { grid-area: 1 / 1; }
+  .vip-seat[data-slot="2"] { grid-area: 1 / 2; }
+  .vip-seat[data-slot="3"] { grid-area: 1 / 3; }
+  .vip-seat[data-slot="4"] { grid-area: 3 / 1; }
+  .vip-seat[data-slot="5"] { grid-area: 3 / 2; }
+  .vip-seat[data-slot="6"] { grid-area: 3 / 3; }
+  .vip-seat-marker { width: 38px; height: 38px; }
+  .vip-seat-chip { width: 31px; height: 31px; }
+  .vip-seat-chip > span { width: 22px; height: 22px; font-size: 1rem; }
+  .vip-table { grid-area: 2 / 1 / 3 / 4; width: min(100%, 340px); justify-self: center; padding: 7px; aspect-ratio: 2.06; }
+  .vip-status { font-size: .68rem; }
+}
+
+@media (max-height: 560px) and (orientation: landscape) {
+  .casino-lockup { transform: translateY(-10dvh); }
+  .casino-lockup h1 { font-size: clamp(2rem, 11dvh, 4.4rem); }
+  .casino-crest { margin-bottom: 5px; width: 30px; }
+  .casino-gems { margin-top: 8px; padding-block: 3px; }
+  .casino-gems img { width: 29px; }
+  .casino-entrance-controls { bottom: 28px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .casino-flow *, .casino-flow *::before, .casino-flow *::after { scroll-behavior: auto; }
+  .casino-door, .casino-entrance-ui, .vip-seat-marker { transition: none; }
+  .vip-seat-chip, .countdown-chip, .countdown-disc[data-exiting="true"] { animation: none; }
+}

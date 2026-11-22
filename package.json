@@ -1,0 +1,33 @@
+{
+  "name": "need-voicechat-games",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  },
+  "scripts": {
+    "dev": "node src/dev/run-dev.mjs",
+    "dev:web": "vp dev --host 127.0.0.1 --port 5178 --strictPort",
+    "dev:dice-server": "node --import tsx src/platform/local-demo-servers/dice/server/start.ts",
+    "dev:casino-server": "node --import tsx src/platform/local-demo-servers/casino-entry/server/start.ts"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.21.0",
+    "@hono/node-server": "2.1.11",
+    "hono": "4.13.19",
+    "react": "19.2.6",
+    "react-dom": "19.2.6",
+    "three": "0.187.0",
+    "ws": "8.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.7",
+    "@types/three": "0.187.0",
+    "@types/ws": "8.18.2",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite-plus": "1.7.0"
+  }
+}
