@@ -133,6 +133,12 @@ export class SoundManager implements EffectAudio {
     }
   }
 
+  private rollSound(at: number) {
+    for (const fraction of [.12, .25, .37, .49, .62]) {
+      this.burst(at + fraction * TUMBLE_DURATION / 1000, .112, .14 - fraction * .11, 1040 - fraction * 620);
+    }
+  }
+
   playCue(effect: EffectKind, cue: Cue, reduced: boolean) {
     if (cue === 'silence') { this.cut(); return; }
     this.gate.play(time => this.synthesize(effect, cue, reduced, time + .008));
@@ -142,13 +148,20 @@ export class SoundManager implements EffectAudio {
 
     switch (effect) {
       case 'DICE_STOP':
-        if (cue === 'start' && !reduced) {
-          for (const fraction of [.12, .25, .37, .49, .62]) {
-            this.burst(at + fraction * TUMBLE_DURATION / 1000, .112, .14 - fraction * .11, 1040 - fraction * 620);
-          }
-        }
+        if (cue === 'start' && !reduced) this.rollSound(at);
         if (cue === 'impact') this.weight(at, .22, .26);
         if (cue === 'glow') this.goldChime(at, .056);
+        break;
+      case 'ONE_CELL_COMEBACK':
+      case 'REROLL_THROW':
+        if (cue === 'start' && effect === 'REROLL_THROW') {
+          this.burst(at, .077, .15, 2600, 'bandpass', .006);
+          this.tone({ at, frequency: 730, end: 443, gain: .11, length: .107, type: 'triangle' });
+        }
+        if (cue === 'roll' && !reduced) this.rollSound(at);
+        if (cue === 'roll-stop') this.weight(at, .19, .19);
+        if (cue === 'flight' && !reduced) this.tone({ at, length: .53, frequency: 310, end: 790, gain: .052, attack: .28 });
+        if (cue === 'place') this.goldChime(at, .052);
         break;
       case 'GEM_PLACEMENT':
         if (cue === 'flight') this.tone({ at, length: .53, frequency: 310, end: 790, gain: .052, attack: .28 });

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { GEMS } from '../../../board/model/gems';
@@ -7,9 +7,13 @@ import type { GemId } from '../../model/geometry';
 import { TUMBLE_DURATION } from '../../model/die-motion';
 import { preloadDice } from '../face-canvases';
 
-export function GemDie3D({ gem, animate }: { gem: GemId; animate: boolean }) {
+export function GemDie3D({ gem, animate, forceSettled, onSettled }: {
+  gem: GemId; animate: boolean; forceSettled?: boolean; onSettled?: () => void;
+}) {
   const host = useRef<HTMLDivElement>(null);
   const [problem, setProblem] = useState('');
+  const settle = useRef({ forceSettled, onSettled });
+  useLayoutEffect(() => { settle.current = { forceSettled, onSettled }; }, [forceSettled, onSettled]);
 
   useEffect(() => {
     const node = host.current;
@@ -92,9 +96,10 @@ export function GemDie3D({ gem, animate }: { gem: GemId; animate: boolean }) {
 
     function frame(now: number) {
       if (disposed) return;
-      if (!duration) {
+      if (!duration || settle.current.forceSettled) {
         cube.quaternion.copy(target);
         render();
+        settle.current.onSettled?.();
         return;
       }
       const start = startedAt ?? now;
@@ -102,10 +107,11 @@ export function GemDie3D({ gem, animate }: { gem: GemId; animate: boolean }) {
       const eased = 1 - (1 - progress) ** 3;
       current.slerpQuaternions(initial, target, eased);
       spin.setFromAxisAngle(spinAxis, Math.PI * 2 * 4 * (1 - eased));
-      cube.quaternion.copy(spin).multiply(current);
+      if (progress < 1) cube.quaternion.copy(spin).multiply(current);
+      else cube.quaternion.copy(target);
       render();
       if (progress < 1) raf = requestAnimationFrame(frame);
-      else cube.quaternion.copy(target);
+      else settle.current.onSettled?.();
     }
 
     void preloadDice().then(canvases => {

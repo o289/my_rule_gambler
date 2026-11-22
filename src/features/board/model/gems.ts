@@ -5,6 +5,11 @@ import amethyst from '../../../shared/assets/gems/amethyst.webp';
 import topaz from '../../../shared/assets/gems/topaz.webp';
 import diamond from '../../../shared/assets/gems/diamond.webp';
 
+import type { GemId } from './gem-ids';
+
+export { GEM_IDS } from './gem-ids';
+export type { GemId } from './gem-ids';
+
 export const GEMS = {
   ruby: { name: 'ルビー', image: ruby, color: '#ff566e' },
   sapphire: { name: 'サファイア', image: sapphire, color: '#6294ff' },
@@ -12,8 +17,4 @@ export const GEMS = {
   amethyst: { name: 'アメジスト', image: amethyst, color: '#c587ff' },
   topaz: { name: 'トパーズ', image: topaz, color: '#ffc26a' },
   diamond: { name: 'ダイヤモンド', image: diamond, color: '#eef3ff' },
-} as const;
-
-export type GemId = keyof typeof GEMS;
-
-export const GEM_IDS: readonly GemId[] = ['ruby', 'sapphire', 'emerald', 'amethyst', 'topaz', 'diamond'];
+} as const satisfies Record<GemId, { name: string; image: string; color: string }>;

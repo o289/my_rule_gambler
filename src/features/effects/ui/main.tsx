@@ -1,5 +1,5 @@
 import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
-import { StrictMode, useRef, useSyncExternalStore } from 'react';
+import { StrictMode, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import '../../board/ui/style.css';
 import './style.css';
@@ -9,7 +9,7 @@ import type { EffectKind } from '../model/effect-model';
 import { EffectScene, EFFECT_ICONS, outcome } from './effects';
 import { effectActions as api, playDemo, player, sound } from '../application/effects-api';
 
-const keys: EffectKind[] = ['DICE_STOP', 'GEM_PLACEMENT', 'BIG_WIN', 'COMEBACK', 'JACKPOT_VICTORY'];
+const keys: EffectKind[] = ['DICE_STOP', 'GEM_PLACEMENT', 'BIG_WIN', 'COMEBACK', 'JACKPOT_VICTORY', 'ONE_CELL_COMEBACK', 'REROLL_THROW'];
 
 declare global {
   interface Window { gamblerEffects: typeof api; }
@@ -21,6 +21,7 @@ function App() {
   const playback = useSyncExternalStore(player.subscribe, player.getSnapshot);
   const stage = useRef<HTMLDivElement>(null);
   const current = playback?.request.kind;
+  const [reroll, setReroll] = useState<'available' | 'blocked'>('available');
   const status = playback ? (playback.playing ? '再生中' : '演出完了') : '準備完了';
   const subtitle = playback && !playback.playing ? outcome(playback.request) : (current ? EFFECT_LABELS[current] : '演出を選んで再生');
   const progress: (CSSProperties & { '--play-duration': string }) | undefined = playback && { '--play-duration': `${playback.duration}ms` } || undefined;
@@ -76,13 +77,20 @@ function App() {
           <h2 id="controls-title">演出を再生</h2>
           <div className="effect-buttons">
             {keys.map(kind => (
-              <button key={kind} type="button" data-effect-button={kind} aria-pressed={current === kind} onClick={() => { showStage(); playDemo(kind); }}>
+              <button key={kind} type="button" data-effect-button={kind} aria-pressed={current === kind} onClick={() => { showStage(); playDemo(kind, reroll); }}>
                 <span className="effect-icon" aria-hidden="true">{EFFECT_ICONS[kind]}</span>
-                <span>{EFFECT_LABELS[kind]}</span>
+                <span>{EFFECT_LABELS[kind]}{kind === 'REROLL_THROW' && <small>続ける</small>}</span>
                 <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true"><path d="m4 2 5 4-5 4Z" fill="currentColor" /></svg>
               </button>
             ))}
           </div>
+          <label htmlFor="reroll-scenario" className="reroll-setting">
+            振り直しの結果
+            <select id="reroll-scenario" value={reroll} onChange={event => setReroll(event.currentTarget.value === 'blocked' ? 'blocked' : 'available')}>
+              <option value="available">配置先あり</option>
+              <option value="blocked">配置先なし</option>
+            </select>
+          </label>
         </aside>
       </div>
     </main>

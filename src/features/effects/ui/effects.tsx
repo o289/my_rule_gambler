@@ -6,6 +6,9 @@ import { GemDie3D } from '../../dice/ui/3d/GemDie3D';
 import { BoardScene, ConvergingLights, GemFlight, locateCell } from './board-scene';
 import { FEATURED_CELL, rankOrder } from '../model/effect-model';
 import type { EffectKind, EffectParams, EffectRequest } from '../model/effect-model';
+import { COMEBACK_GEM, NEXT_PLAYER, rerollTargets, TURN_COMEBACK_RANK } from '../model/effect-turn';
+import { player } from '../application/effects-api';
+import { TurnScene } from './turn-scene';
 import { reached } from '../application/effect-player';
 import type { EffectPlayback } from '../application/effect-player';
 import { centerWithin, CountUp, GoldParticles, GoldText, ScreenFlash, Shockwave, useScreenShake } from './visuals';
@@ -207,6 +210,15 @@ export function EffectScene({ playback, stage }: SharedSceneProps) {
     case 'DICE_STOP': return <DiceStopEffect playback={playback} params={request.params} stage={stage} />;
     case 'GEM_PLACEMENT': return <GemPlacementEffect playback={playback} params={request.params} stage={stage} />;
     case 'BIG_WIN': return <BigWinEffect playback={playback} params={request.params} stage={stage} />;
+    case 'ONE_CELL_COMEBACK': {
+      const ranking = request.params.gem === COMEBACK_GEM && reached(playback, 'comeback');
+      return <>
+        <TurnScene playback={playback} request={request} stage={stage} settleRoll={id => player.settleRoll(id)} ranking={ranking} />
+        {ranking && <ComebackEffect playback={playback} params={TURN_COMEBACK_RANK} stage={stage} />}
+      </>;
+    }
+    case 'REROLL_THROW':
+      return <TurnScene playback={playback} request={request} stage={stage} settleRoll={id => player.settleRoll(id)} />;
     case 'COMEBACK': return <ComebackEffect playback={playback} params={request.params} stage={stage} />;
     case 'JACKPOT_VICTORY': return <JackpotVictoryEffect playback={playback} params={request.params} stage={stage} />;
   }
@@ -217,11 +229,15 @@ export function outcome({ kind, params }: EffectRequest) {
     case 'DICE_STOP': return GEMS[params.gem].name;
     case 'GEM_PLACEMENT': return `${GEMS[params.gem].name}を配置しました`;
     case 'BIG_WIN': return `${params.playerName}　+${params.points.toLocaleString('ja-JP')}点`;
+    case 'ONE_CELL_COMEBACK':
+      return params.gem === COMEBACK_GEM ? `${TURN_COMEBACK_RANK.playerName}　${TURN_COMEBACK_RANK.fromRank}位 → 1位` : `${GEMS[params.gem].name}　逆転ならず`;
+    case 'REROLL_THROW':
+      return rerollTargets(params.gem).length ? `${GEMS[params.gem].name}を配置可能` : `配置できるマスなし · ${NEXT_PLAYER.name} の手番`;
     case 'COMEBACK': return `${params.playerName}　${params.fromRank}位 → ${params.toRank}位`;
     case 'JACKPOT_VICTORY': return `勝者　${params.playerName}`;
   }
 }
 
 export const EFFECT_ICONS: Record<EffectKind, string> = {
-  DICE_STOP: '◇', GEM_PLACEMENT: '◈', BIG_WIN: '✦', COMEBACK: 'ϟ', JACKPOT_VICTORY: '♛',
+  DICE_STOP: '◇', GEM_PLACEMENT: '◈', BIG_WIN: '✦', ONE_CELL_COMEBACK: '◆', REROLL_THROW: '↻', COMEBACK: 'ϟ', JACKPOT_VICTORY: '♛',
 };

@@ -3,7 +3,7 @@ import type { Ref, RefObject } from 'react';
 import { GamblerBoard } from '../../board/ui/GamblerBoard';
 import { cellKey, initialState } from '../../board/model/board-model';
 import { SAMPLE_BOARD } from '../../../dev/preview-data/sample-board';
-import type { CellAddress } from '../../board/model/board-model';
+import type { BoardDefinition, CellAddress } from '../../board/model/board-model';
 import { GEMS, GEM_IDS } from '../../board/model/gems';
 import type { GemId } from '../../board/model/gems';
 import { centerWithin } from './visuals';
@@ -20,21 +20,24 @@ export function locateCell(board: HTMLElement | null, target?: CellAddress) {
 interface BoardSceneProps {
   viewportRef?: Ref<HTMLElement>;
   target?: CellAddress;
+  definition?: BoardDefinition;
+  turnCue?: { cells: readonly CellAddress[]; tone: 'aim' | 'available'; pulse: boolean };
   placed?: GemId;
   tone?: 'gold' | 'gem';
 }
 
-export const BoardScene = memo(function BoardScene({ viewportRef, target, placed, tone }: BoardSceneProps) {
+export const BoardScene = memo(function BoardScene({ viewportRef, target, definition = SAMPLE_BOARD, turnCue, placed, tone }: BoardSceneProps) {
   const board = useRef<HTMLElement>(null);
   const state = useMemo(() => {
-    const occupied = new Map(initialBoard.occupied);
+    const base = definition === SAMPLE_BOARD ? initialBoard : initialState(definition);
+    const occupied = new Map(base.occupied);
     if (target) {
       const key = cellKey(target);
       if (placed) occupied.set(key, placed);
       else occupied.delete(key);
     }
-    return { ...initialBoard, occupied, selection: target ?? null };
-  }, [target, placed]);
+    return { ...base, occupied, selection: target ?? null };
+  }, [definition, target, placed]);
 
   useLayoutEffect(() => {
     const cell = locateCell(board.current, target);
@@ -50,6 +53,21 @@ export const BoardScene = memo(function BoardScene({ viewportRef, target, placed
     return () => { delete cell.dataset.fxTarget; };
   }, [target, tone]);
 
+  useLayoutEffect(() => {
+    if (!turnCue) return;
+    const cells = turnCue.cells.map(cell => locateCell(board.current, cell)).filter(cell => cell !== null);
+    for (const cell of cells) {
+      cell.dataset.turnTarget = turnCue.tone;
+      if (turnCue.pulse) cell.dataset.turnPulse = 'true';
+    }
+    return () => {
+      for (const cell of cells) {
+        delete cell.dataset.turnTarget;
+        delete cell.dataset.turnPulse;
+      }
+    };
+  }, [turnCue]);
+
   function shareViewport(element: HTMLElement | null) {
     board.current = element;
     if (typeof viewportRef === 'function') viewportRef(element);
@@ -58,7 +76,7 @@ export const BoardScene = memo(function BoardScene({ viewportRef, target, placed
 
   return (
     <div className="shared-board" data-light={tone} inert aria-hidden="true">
-      <GamblerBoard board={SAMPLE_BOARD} state={state} onSelect={noSelection} viewportRef={shareViewport} />
+      <GamblerBoard board={definition} state={state} onSelect={noSelection} viewportRef={shareViewport} />
     </div>
   );
 });

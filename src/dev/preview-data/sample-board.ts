@@ -1,5 +1,5 @@
 import type { BoardDefinition } from '../../features/board/model/board-model';
-import { GEM_IDS } from '../../features/board/model/gems';
+import { GEM_IDS } from '../../features/board/model/gem-ids';
 
 export const SAMPLE_BOARD: BoardDefinition = {
   columns: GEM_IDS.map(gem => ({ id: gem, gem })),
