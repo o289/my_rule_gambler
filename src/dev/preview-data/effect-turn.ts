@@ -49,6 +49,8 @@ export const DEMO: EffectParams = {
   BIG_WIN: { playerName: 'PLAYER 1', points: 100, target: LAST_CELL },
   ONE_CELL_COMEBACK: { gem: COMEBACK_GEM },
   REROLL_THROW: { gem: REROLL_RESULTS.available },
+  TURN_CHANGE: { playerName: CURRENT_PLAYER.name, isLocal: true },
+  LOSS_NOTICE: { playerName: CURRENT_PLAYER.name, paidPoints: 10, target: { rowId: 'penalty', columnId: 'ruby' } },
   COMEBACK: { playerName: 'PLAYER 1', opponents: ['PLAYER 2', 'PLAYER 3'], fromRank: 3, toRank: 1 },
   JACKPOT_VICTORY: { playerName: 'PLAYER 1', gem: 'amethyst', target: LAST_CELL },
 };

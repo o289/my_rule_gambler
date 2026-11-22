@@ -55,7 +55,7 @@ export function CoinFlights({ flights, stage }: { flights: ReadonlyMap<string, F
     function measure() {
       if (!scene || !canvas) return;
       const boundary = scene.getBoundingClientRect();
-      const available = scene.querySelector('#vault-mouth');
+      const available = scene.querySelector('[data-vault-mouth]');
       if (!available) return;
       width = boundary.width;
       height = boundary.height;

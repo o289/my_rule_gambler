@@ -20,12 +20,13 @@ interface BoardSceneProps {
   target?: CellAddress;
   definition: BoardDefinition;
   award?: BoardAward | null;
+  scoreNotice?: { rowId: string; label: string };
   turnCue?: { cells: readonly CellAddress[]; tone: 'aim' | 'available'; pulse: boolean };
   placed?: GemId;
   tone?: 'gold' | 'gem';
 }
 
-export const BoardScene = memo(function BoardScene({ viewportRef, target, definition, award, turnCue, placed, tone }: BoardSceneProps) {
+export const BoardScene = memo(function BoardScene({ viewportRef, target, definition, award, scoreNotice, turnCue, placed, tone }: BoardSceneProps) {
   const board = useRef<HTMLElement>(null);
   const state = useMemo(() => {
     const base = initialState(definition);
@@ -75,7 +76,7 @@ export const BoardScene = memo(function BoardScene({ viewportRef, target, defini
 
   return (
     <div className="shared-board" data-light={tone} inert aria-hidden="true">
-      <GamblerBoard board={definition} state={state} onSelect={noSelection} viewportRef={shareViewport} />
+      <GamblerBoard board={definition} state={state} onSelect={noSelection} viewportRef={shareViewport} scoreNotice={scoreNotice} />
     </div>
   );
 });

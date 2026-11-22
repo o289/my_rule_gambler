@@ -1,0 +1,42 @@
+@property --turn-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+.turn-highlight {
+  position: absolute;
+  z-index: -1;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: turn-entry 690ms ease-out both;
+}
+
+.turn-highlight i {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.4px;
+  opacity: .78;
+  background: conic-gradient(from var(--turn-angle), #9d643450 0%, #c28a4dc2 37%, #ffe5a3 45%, #dfad65 51%, #925f3539 61%, #9d643450);
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: turn-light 6.8s linear infinite;
+}
+
+@keyframes turn-entry {
+  0% { opacity: 0; box-shadow: 0 0 0 #e8ae51; }
+  33% { opacity: 1; box-shadow: 0 0 21px #ffc15ca3; }
+  100% { opacity: .82; box-shadow: 0 0 5px #ffbd5d49; }
+}
+@keyframes turn-light { to { --turn-angle: 360deg; } }
+
+.turn-highlight[data-once="true"] i {
+  animation-duration: 690ms;
+  animation-iteration-count: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .turn-highlight, .turn-highlight i { animation: none; }
+}

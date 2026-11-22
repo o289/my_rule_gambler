@@ -1,5 +1,6 @@
 import type { Player, PlayerSnapshot } from '../model/player-data';
 import { CrownIcon, ChevronIcon, DiceIcon } from './vip-icons';
+import { CurrentTurnHighlight } from './turn-highlight';
 import crest from '../../../shared/assets/effects/victory-crest.webp';
 import filigree from '../../../shared/assets/effects/title-filigree.webp';
 import coinFifty from '../../../shared/assets/bank/coin-50.webp';
@@ -14,10 +15,6 @@ function PlayerLabels({ current, you, detail = false }: { current: boolean; you:
       {detail && !current && <span className="waiting-turn">手番待ち</span>}
     </span>
   );
-}
-
-export function CurrentTurnHighlight() {
-  return <span className="turn-highlight" aria-hidden="true"><i /></span>;
 }
 
 interface PlayerListItemProps {

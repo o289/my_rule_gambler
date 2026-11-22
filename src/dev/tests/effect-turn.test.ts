@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { canSelect, cellKey, initialState } from '../../features/board/model/board-model';
 import { EffectPlayer } from '../../features/effects/application/effect-player';
-import { beatsFor, readEffect } from '../../features/effects/model/effect-model';
+import { beatsFor, lossCoins, lossLabel, readEffect, turnLabel } from '../../features/effects/model/effect-model';
 import type { Cue, EffectKind } from '../../features/effects/model/effect-model';
 import {
   COMEBACK_BOARD, COMEBACK_GEM, COMEBACK_SCORE, CURRENT_PLAYER, LAST_CELL,
@@ -126,4 +126,36 @@ test('a missed amethyst never places or activates COMEBACK, and a stale roll can
   assert.equal(player.getSnapshot()?.phase, 'finish');
   player.reset();
   assert.equal(player.getSnapshot(), null);
+});
+
+test('turn announcements use each viewer’s role and only run the entry cue once', () => {
+  assert.equal(turnLabel({ playerName: 'PLAYER 1', isLocal: true }), 'あなたの手番');
+  assert.equal(turnLabel({ playerName: 'PLAYER 2', isLocal: false }), 'PLAYER 2の手番');
+  const { player, advance, sounded } = playbackFixture();
+  player.play(readEffect('TURN_CHANGE', { playerName: 'PLAYER 1', isLocal: true }), false);
+  advance(1000);
+  assert.equal(player.getSnapshot()?.playing, false);
+  assert.deepEqual(sounded.filter(([, cue]) => cue === 'start'), [['TURN_CHANGE', 'start']]);
+});
+
+test('the loss preview uses the confirmed payment and only opens the vault for a positive payment', () => {
+  const { demo, featuredCell } = EFFECT_PREVIEW_SCENARIO;
+  const details = demo.LOSS_NOTICE;
+  const board = { ...SAMPLE_BOARD, rows: SAMPLE_BOARD.rows.map(row => row.id === details.target.rowId ? { ...row, score: -50 } : row) };
+  const context = { board, featuredCell };
+  for (const paidPoints of [0, 10]) {
+    const { player, advance, sounded } = playbackFixture();
+    const request = readEffect('LOSS_NOTICE', { ...details, paidPoints }, context);
+    assert.equal(lossLabel(paidPoints), paidPoints ? '−10点' : '支払いなし');
+    assert.deepEqual(lossCoins(paidPoints).map(coin => coin.value), paidPoints ? [10] : []);
+    player.play(request, false);
+    advance(5000);
+    assert.deepEqual(sounded.map(([, cue]) => cue), paidPoints
+      ? ['start', 'place', 'charge', 'flight', 'reveal', 'finish']
+      : ['start', 'place', 'finish']);
+    assert.equal(player.getSnapshot()?.playing, false);
+    assert.ok(!beatsFor(request, true, EFFECT_PREVIEW_SCENARIO.turn).some(beat => beat.cue === 'flight'));
+  }
+  assert.throws(() => readEffect('LOSS_NOTICE', { ...details, target: featuredCell }, context), RangeError);
+  assert.throws(() => readEffect('LOSS_NOTICE', { ...details, paidPoints: 60 }, context), RangeError);
 });

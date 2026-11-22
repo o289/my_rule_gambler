@@ -3,9 +3,10 @@ import type { RefObject } from 'react';
 import { GEMS } from '../../board/model/gems';
 import { GemDie3D } from '../../dice/ui/3d/GemDie3D';
 import { BoardScene, ConvergingLights, GemFlight, locateCell } from './board-scene';
-import { rankOrder } from '../model/effect-model';
+import { lossLabel, rankOrder, turnLabel } from '../model/effect-model';
 import type { EffectKind, EffectParams, EffectRequest, EffectScenario } from '../model/effect-model';
 import { TurnScene } from './turn-scene';
+import { LossNoticeEffect, TurnChangeEffect } from './settlement-scenes';
 import { reached } from '../application/effect-player';
 import type { EffectPlayback } from '../application/effect-player';
 import { centerWithin, CountUp, GoldParticles, GoldText, ScreenFlash, Shockwave, useScreenShake } from './visuals';
@@ -203,7 +204,7 @@ export function JackpotVictoryEffect({ playback, params, stage, scenario }: Scen
   );
 }
 
-export function EffectScene({ playback, stage, scenario, settleRoll }: ScenarioSceneProps & { settleRoll: (id: number) => void }) {
+export function EffectScene({ playback, stage, scenario, settleRoll, onRoll }: ScenarioSceneProps & { settleRoll: (id: number) => void; onRoll: () => void }) {
   const { request } = playback;
   switch (request.kind) {
     case 'DICE_STOP': return <DiceStopEffect playback={playback} params={request.params} stage={stage} />;
@@ -218,6 +219,8 @@ export function EffectScene({ playback, stage, scenario, settleRoll }: ScenarioS
     }
     case 'REROLL_THROW':
       return <TurnScene playback={playback} request={request} stage={stage} scenario={scenario.turn} settleRoll={settleRoll} />;
+    case 'TURN_CHANGE': return <TurnChangeEffect playback={playback} params={request.params} scenario={scenario} onRoll={onRoll} />;
+    case 'LOSS_NOTICE': return <LossNoticeEffect playback={playback} params={request.params} scenario={scenario} />;
     case 'COMEBACK': return <ComebackEffect playback={playback} params={request.params} stage={stage} />;
     case 'JACKPOT_VICTORY': return <JackpotVictoryEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
   }
@@ -231,12 +234,14 @@ export function outcome({ kind, params }: EffectRequest, scenario: EffectScenari
     case 'ONE_CELL_COMEBACK':
       return params.gem === scenario.turn.comebackGem ? `${scenario.turn.comebackRank.playerName}　${scenario.turn.comebackRank.fromRank}位 → ${scenario.turn.comebackRank.toRank}位` : `${GEMS[params.gem].name}　逆転ならず`;
     case 'REROLL_THROW':
-      return scenario.turn.rerollTargets(params.gem).length ? `${GEMS[params.gem].name}を配置可能` : `配置できるマスなし · ${scenario.turn.nextPlayer.name} の手番`;
+      return scenario.turn.rerollTargets(params.gem).length ? `${GEMS[params.gem].name}を配置可能` : `配置できるマスなし · ${turnLabel({ playerName: scenario.turn.nextPlayer.name, isLocal: false })}`;
+    case 'TURN_CHANGE': return turnLabel(params);
+    case 'LOSS_NOTICE': return `${params.playerName}　${lossLabel(params.paidPoints)}`;
     case 'COMEBACK': return `${params.playerName}　${params.fromRank}位 → ${params.toRank}位`;
     case 'JACKPOT_VICTORY': return `勝者　${params.playerName}`;
   }
 }
 
 export const EFFECT_ICONS: Record<EffectKind, string> = {
-  DICE_STOP: '◇', GEM_PLACEMENT: '◈', BIG_WIN: '✦', ONE_CELL_COMEBACK: '◆', REROLL_THROW: '↻', COMEBACK: 'ϟ', JACKPOT_VICTORY: '♛',
+  DICE_STOP: '◇', GEM_PLACEMENT: '◈', BIG_WIN: '✦', ONE_CELL_COMEBACK: '◆', REROLL_THROW: '↻', TURN_CHANGE: '♔', LOSS_NOTICE: '−', COMEBACK: 'ϟ', JACKPOT_VICTORY: '♛',
 };

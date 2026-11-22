@@ -41,7 +41,7 @@ export function Vault({ run }: { run: BankRun | null }) {
         <div className="vault-portal" data-open={open} data-unlocked={unlocked} data-instant={!run || run.skipped}>
           <div className="vault-tunnel-light" />
           <div className="vault-rim-light" />
-          <span id="vault-mouth" className="vault-mouth">
+          <span id="vault-mouth" className="vault-mouth" data-vault-mouth="">
             {run?.playing && open && pulse && <span key={pulse.id} className="vault-receipt">
               <img className="receipt-wave" src={receiptRing} alt="" />
               <i className="receipt-core" />

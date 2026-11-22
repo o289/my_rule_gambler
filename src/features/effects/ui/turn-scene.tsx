@@ -6,6 +6,7 @@ import { reached } from '../application/effect-player';
 import type { EffectPlayback } from '../application/effect-player';
 import type { EffectRequest, EffectTurnScenario } from '../model/effect-model';
 import { BoardScene, GemFlight } from './board-scene';
+import { TurnAnnouncement } from './settlement-scenes';
 
 type TurnRequest = Extract<EffectRequest, { kind: 'ONE_CELL_COMEBACK' | 'REROLL_THROW' }>;
 
@@ -35,7 +36,6 @@ export function TurnScene({ playback, request, stage, settleRoll, scenario, rank
   const tone: 'aim' | 'available' = comeback ? 'aim' : 'available';
   const turnCue = useMemo(() => ({ cells: marked, tone, pulse }), [marked, tone, pulse]);
   const passed = !comeback && !lanes.length && reached(playback, 'handoff');
-  const player = passed ? scenario.nextPlayer : scenario.currentPlayer;
   const retain = !comeback && !rolling;
   const score = scenario.currentPlayer.score + (placed ? scenario.comebackScore : 0);
 
@@ -44,7 +44,9 @@ export function TurnScene({ playback, request, stage, settleRoll, scenario, rank
       <BoardScene viewportRef={board} definition={comeback ? scenario.comebackBoard : scenario.board}
         turnCue={turnCue} target={comeback ? scenario.lastCell : undefined} placed={placed ? gem : undefined} />
       <section className="turn-panel" aria-label="一投の状況">
-        <div className="turn-player" data-next={passed}><span>{player.name}</span><span>の手番</span></div>
+        {passed
+          ? <TurnAnnouncement player={{ playerName: scenario.nextPlayer.name, isLocal: false }} pulse={!playback.skipped && !playback.reduced} />
+          : <div className="turn-player"><span>{scenario.currentPlayer.name}</span><span>の手番</span></div>}
         {comeback && (
           <>
             <p className="turn-objective">{GEMS[scenario.comebackGem].name}で <strong>＋{scenario.comebackScore}点 → 1位</strong></p>

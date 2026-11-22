@@ -4,6 +4,7 @@ import goldHundred from '../../../shared/assets/bank/coin-100.webp';
 import goldFifty from '../../../shared/assets/bank/coin-50.webp';
 import goldTen from '../../../shared/assets/bank/coin-10.webp';
 import coinBack from '../../../shared/assets/bank/coin-back.webp';
+import './coin.css';
 
 const FACES = {
   10: { image: goldTen, alloy: 'champagne' },

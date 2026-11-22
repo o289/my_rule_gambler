@@ -16,17 +16,18 @@ interface BoardCellProps {
   expected?: GemId;
   gem?: GemId;
   goal?: number;
+  goalLabel?: string;
   placementId?: number;
   awardId?: number;
   scoreDelay: number;
   onSelect: (cell: CellAddress) => void;
 }
 
-export function BoardCell({ address, label, state, selected, expected, gem, goal, placementId, awardId, scoreDelay, onSelect }: BoardCellProps) {
+export function BoardCell({ address, label, state, selected, expected, gem, goal, goalLabel, placementId, awardId, scoreDelay, onSelect }: BoardCellProps) {
   const placed = gem !== undefined;
   const blocked = state === 'blocked';
   const displayed = gem ?? expected;
-  const scoreLabel = goal === undefined ? undefined : formatScore(goal);
+  const scoreLabel = goalLabel ?? (goal === undefined ? undefined : formatScore(goal));
   const scoreStyle: CSSProperties & { '--score-length': number } = { '--score-length': scoreLabel?.length ?? 1 };
   return (
     <div className="grid-cell" role="cell">
@@ -51,7 +52,7 @@ export function BoardCell({ address, label, state, selected, expected, gem, goal
         {awardId !== undefined && <span key={awardId} className="score-flash" aria-hidden="true" style={{ animationDelay: `${scoreDelay}ms` }} />}
       </button>
       {goal !== undefined && (
-        <span className="score-plate" data-negative={goal < 0} data-active={awardId !== undefined} style={scoreStyle} aria-hidden="true">
+        <span className="score-plate" data-negative={goal < 0} data-active={awardId !== undefined} data-notice={Boolean(goalLabel) || undefined} style={scoreStyle} aria-hidden="true">
           <span className="score-value" key={awardId ?? 'score'}>{scoreLabel}</span>
         </span>
       )}
@@ -64,6 +65,7 @@ interface BoardProps {
   state: BoardState;
   viewportRef: Ref<HTMLElement>;
   onSelect: (cell: CellAddress) => void;
+  scoreNotice?: { rowId: string; label: string };
 }
 
 type BoardStyle = CSSProperties & {
@@ -79,7 +81,7 @@ function formatShortState(state: CellState, gem?: GemId) {
   return state === 'available' ? '次に配置できるマス' : '未配置';
 }
 
-export function GamblerBoard({ board, state, viewportRef, onSelect }: BoardProps) {
+export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice }: BoardProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const cabinet = useRef<HTMLDivElement>(null);
   const [isOverflowing, setOverflowing] = useState(false);
@@ -141,6 +143,7 @@ export function GamblerBoard({ board, state, viewportRef, onSelect }: BoardProps
                         expected={expected}
                         gem={gem}
                         goal={isGoal ? score : undefined}
+                        goalLabel={isGoal && scoreNotice?.rowId === row.id ? scoreNotice.label : undefined}
                         placementId={!blocked && state.placement?.cell === key ? state.placement.id : undefined}
                         awardId={blocked ? undefined : awardId}
                         scoreDelay={playableIndex * SCORE_STAGGER_MS}

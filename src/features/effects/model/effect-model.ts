@@ -2,7 +2,9 @@ import { LANDING_FRACTION, TUMBLE_DURATION } from '../../dice/model/die-motion';
 import { GEM_IDS } from '../../board/model/gem-ids';
 import type { GemId } from '../../board/model/gem-ids';
 import type { BoardDefinition, CellAddress } from '../../board/model/board-model';
-import { canSelect } from '../../board/model/board-model';
+import { canSelect, formatScore, goalColumn } from '../../board/model/board-model';
+import { BANK_AMOUNT_STEP, COIN_TRAVEL_MS } from '../../bank/model/bank-model';
+import type { Coin } from '../../bank/model/bank-model';
 
 export interface EffectParams {
   DICE_STOP: { gem: GemId };
@@ -10,6 +12,8 @@ export interface EffectParams {
   BIG_WIN: { playerName: string; points: number; target?: CellAddress };
   ONE_CELL_COMEBACK: { gem: GemId };
   REROLL_THROW: { gem: GemId };
+  TURN_CHANGE: { playerName: string; isLocal: boolean };
+  LOSS_NOTICE: { playerName: string; paidPoints: number; target: CellAddress };
   COMEBACK: { playerName: string; opponents: readonly string[]; fromRank: number; toRank: number };
   JACKPOT_VICTORY: { playerName: string; gem: GemId; target?: CellAddress };
 }
@@ -49,6 +53,8 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   COMEBACK: 'COMEBACK',
   ONE_CELL_COMEBACK: 'あと1マスで逆転',
   REROLL_THROW: '振り直しの一投',
+  TURN_CHANGE: '手番の切り替え',
+  LOSS_NOTICE: '失点の通知',
   JACKPOT_VICTORY: 'JACKPOT VICTORY',
 };
 
@@ -59,7 +65,11 @@ export interface Beat {
   cue: Cue;
 }
 
-const timeline: Record<Exclude<EffectKind, 'ONE_CELL_COMEBACK' | 'REROLL_THROW'>, readonly Beat[]> = {
+const timeline: Record<Exclude<EffectKind, 'ONE_CELL_COMEBACK' | 'REROLL_THROW' | 'LOSS_NOTICE'>, readonly Beat[]> = {
+  TURN_CHANGE: [
+    { at: 0, cue: 'start' },
+    { at: 690, cue: 'finish' },
+  ],
   DICE_STOP: [
     { at: 0, cue: 'start' },
     { at: Math.round(TUMBLE_DURATION * LANDING_FRACTION), cue: 'impact' },
@@ -134,6 +144,37 @@ function turnBeats(request: Extract<EffectRequest, { kind: 'ONE_CELL_COMEBACK' |
   ];
 }
 
+export const LOSS_COIN_STAGGER_MS = 105;
+
+export function lossCoins(paidPoints: number): readonly Coin[] {
+  let remaining = paidPoints;
+  // Animate the leading coins of each stack for larger penalties.
+  return ([100, 50, 10] as const).flatMap(value => {
+    const count = Math.floor(remaining / value);
+    remaining %= value;
+    return Array.from({ length: Math.min(count, 5) }, (_, index) => ({ id: `loss-${value}-${index}`, value }));
+  });
+}
+
+export function lossLabel(paidPoints: number) {
+  return paidPoints > 0 ? `${formatScore(-paidPoints)}点` : '支払いなし';
+}
+
+export function turnLabel({ playerName, isLocal }: EffectParams['TURN_CHANGE']) {
+  return isLocal ? 'あなたの手番' : `${playerName}の手番`;
+}
+
+function lossBeats(paidPoints: number, reduced: boolean): readonly Beat[] {
+  const place = reduced ? 120 : 460;
+  const opening: Beat[] = [{ at: 0, cue: 'start' }, { at: place, cue: 'place' }];
+  if (paidPoints === 0) return [...opening, { at: place + 1180, cue: 'finish' }];
+  if (reduced) return [...opening, { at: place + 550, cue: 'reveal' }, { at: place + 900, cue: 'finish' }];
+  const launch = 1520;
+  const arrival = launch + COIN_TRAVEL_MS + (lossCoins(paidPoints).length - 1) * LOSS_COIN_STAGGER_MS;
+  return [...opening, { at: 1080, cue: 'charge' }, { at: launch, cue: 'flight' },
+    { at: arrival, cue: 'reveal' }, { at: arrival + 410, cue: 'finish' }];
+}
+
 export function beatsFor(request: EffectRequest, reduced: boolean, scenario: EffectTurnScenario) {
   switch (request.kind) {
     case 'ONE_CELL_COMEBACK':
@@ -141,6 +182,10 @@ export function beatsFor(request: EffectRequest, reduced: boolean, scenario: Eff
       return turnBeats(request, reduced, scenario);
     case 'DICE_STOP':
       return reduced ? quietDice : timeline.DICE_STOP;
+    case 'TURN_CHANGE':
+      return reduced ? [{ at: 0, cue: 'start' }, { at: 200, cue: 'finish' }] as const : timeline.TURN_CHANGE;
+    case 'LOSS_NOTICE':
+      return lossBeats(request.params.paidPoints, reduced);
     default:
       return timeline[request.kind];
   }
@@ -193,6 +238,21 @@ export function readEffect(kind: unknown, params: unknown, context?: EffectTarge
       return { kind, params: { gem: readGem(params.gem) } };
     case 'GEM_PLACEMENT':
       return { kind, params: { gem: readGem(params.gem), target: readTarget(params.target, context?.board) } };
+    case 'TURN_CHANGE':
+      if (typeof params.isLocal !== 'boolean') throw new TypeError('自分の手番かどうかを指定してください。');
+      return { kind, params: { playerName: readName(params.playerName), isLocal: params.isLocal } };
+    case 'LOSS_NOTICE': {
+      const target = readTarget(params.target, context?.board);
+      const paidPoints = params.paidPoints;
+      if (typeof paidPoints !== 'number' || !Number.isSafeInteger(paidPoints) || paidPoints < 0 || paidPoints % BANK_AMOUNT_STEP !== 0) {
+        throw new RangeError('確定した支払額を0点または10点単位で指定してください。');
+      }
+      const row = context?.board.rows.find(item => item.id === target.rowId);
+      if (row && context && (row.score >= 0 || goalColumn(context.board, row)?.id !== target.columnId || paidPoints > -row.score)) {
+        throw new RangeError('マイナスの行のゴールと、行の失点以下の支払額を指定してください。');
+      }
+      return { kind, params: { playerName: readName(params.playerName), paidPoints, target } };
+    }
     case 'BIG_WIN': {
       if (typeof params.points !== 'number' || !Number.isSafeInteger(params.points) || params.points <= 0) {
         throw new RangeError('獲得得点には正の整数を指定してください。');

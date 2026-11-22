@@ -1,5 +1,5 @@
 import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
-import { StrictMode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Fragment, StrictMode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import type { EffectsRuntime } from '../application/effects-api';
 import '../../board/ui/style.css';
@@ -13,7 +13,7 @@ import './board-score/score-effect.css';
 import { playableColumns } from '../../board/model/board-model';
 import type { BoardAward } from '../../board/model/board-model';
 
-const keys: EffectKind[] = ['DICE_STOP', 'GEM_PLACEMENT', 'BIG_WIN', 'COMEBACK', 'JACKPOT_VICTORY', 'ONE_CELL_COMEBACK', 'REROLL_THROW'];
+const keys: EffectKind[] = ['DICE_STOP', 'GEM_PLACEMENT', 'BIG_WIN', 'COMEBACK', 'JACKPOT_VICTORY', 'ONE_CELL_COMEBACK', 'REROLL_THROW', 'TURN_CHANGE', 'LOSS_NOTICE'];
 
 function App({ runtime }: { runtime: EffectsRuntime }) {
   useAudioActivation(runtime.audio.unlock);
@@ -22,6 +22,8 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
   const scenario = runtime.scenario;
   const current = playback?.request.kind;
   const [reroll, setReroll] = useState<'available' | 'blocked'>('available');
+  const [otherTurn, setOtherTurn] = useState(false);
+  const [noPayment, setNoPayment] = useState(false);
   const [scoreAward, setScoreAward] = useState<BoardAward | null>(null);
   const [scoreResult, setScoreResult] = useState<BoardAward | null>(null);
   const [scoreReduced, setScoreReduced] = useState(false);
@@ -70,6 +72,13 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
     if (rect.top < 10 || rect.bottom > innerHeight - 10) display.scrollIntoView({ block: 'start' });
   }
 
+  function playDemo(kind: EffectKind) {
+    setScoreAward(null);
+    setScoreResult(null);
+    showStage();
+    runtime.playDemo(kind, { reroll, otherTurn, noPayment });
+  }
+
   return (
     <main className="effects-app">
       <header className="effects-masthead">
@@ -93,7 +102,7 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
             <div className="stage-surface" aria-hidden="true" />
             <div className="stage-corners" aria-hidden="true"><i /><i /><i /><i /></div>
             {playback ? <EffectScene key={playback.id} playback={playback} stage={stage} scenario={scenario}
-              settleRoll={id => runtime.player.settleRoll(id)} /> : <BoardScene definition={scenario.board} award={scoreAward} />}
+              settleRoll={id => runtime.player.settleRoll(id)} onRoll={() => playDemo('DICE_STOP')} /> : <BoardScene definition={scenario.board} award={scoreAward} />}
           </div>
           <div className="stage-footer">
             {playback && <div className="progress-rail" aria-hidden="true">
@@ -115,11 +124,34 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
           <h2 id="controls-title">演出を再生</h2>
           <div className="effect-buttons">
             {keys.map(kind => (
-              <button key={kind} type="button" data-effect-button={kind} aria-pressed={current === kind} onClick={() => { setScoreAward(null); setScoreResult(null); showStage(); runtime.playDemo(kind, reroll); }}>
-                <span className="effect-icon" aria-hidden="true">{EFFECT_ICONS[kind]}</span>
-                <span>{EFFECT_LABELS[kind]}{kind === 'REROLL_THROW' && <small>続ける</small>}</span>
-                <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true"><path d="m4 2 5 4-5 4Z" fill="currentColor" /></svg>
-              </button>
+              <Fragment key={kind}>
+                <button type="button" data-effect-button={kind} aria-pressed={current === kind} onClick={() => playDemo(kind)}>
+                  <span className="effect-icon" aria-hidden="true">{EFFECT_ICONS[kind]}</span>
+                  <span>{EFFECT_LABELS[kind]}{kind === 'REROLL_THROW' && <small>続ける</small>}</span>
+                  <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true"><path d="m4 2 5 4-5 4Z" fill="currentColor" /></svg>
+                </button>
+                {kind === 'REROLL_THROW' && <label className="effect-setting">
+                  振り直しの結果
+                  <select value={reroll} onChange={event => setReroll(event.currentTarget.value === 'blocked' ? 'blocked' : 'available')}>
+                    <option value="available">配置先あり</option>
+                    <option value="blocked">配置先なし</option>
+                  </select>
+                </label>}
+                {kind === 'TURN_CHANGE' && <label className="effect-setting">
+                  表示場面
+                  <select value={otherTurn ? 'other' : 'local'} onChange={event => setOtherTurn(event.currentTarget.value === 'other')}>
+                    <option value="local">初回ロール前（自分）</option>
+                    <option value="other">手番交代後（他の人）</option>
+                  </select>
+                </label>}
+                {kind === 'LOSS_NOTICE' && <label className="effect-setting">
+                  確定した支払額
+                  <select value={noPayment ? 'zero' : 'paid'} onChange={event => setNoPayment(event.currentTarget.value === 'zero')}>
+                    <option value="paid">{scenario.demo.LOSS_NOTICE.paidPoints}点</option>
+                    <option value="zero">0点</option>
+                  </select>
+                </label>}
+              </Fragment>
             ))}
             <button type="button" data-effect-button="BOARD_SCORE" aria-pressed={Boolean(scoreAward)} disabled={!scoreRow || Boolean(scoreAward)} onClick={playScoreEffect}>
               <span className="effect-icon" aria-hidden="true">✦</span>
@@ -131,13 +163,6 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
               <strong data-negative={Boolean(scoreResult && scoreResult.amount < 0)}>{scoreResult ? `${scoreResult.amount > 0 ? '+' : ''}${scoreResult.amount}点` : '—'}</strong>
             </div>
           </div>
-          <label htmlFor="reroll-scenario" className="reroll-setting">
-            振り直しの結果
-            <select id="reroll-scenario" value={reroll} onChange={event => setReroll(event.currentTarget.value === 'blocked' ? 'blocked' : 'available')}>
-              <option value="available">配置先あり</option>
-              <option value="blocked">配置先なし</option>
-            </select>
-          </label>
         </aside>
       </div>
     </main>

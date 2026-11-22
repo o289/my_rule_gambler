@@ -876,8 +876,6 @@ body {
   font-size: .72rem;
 }
 .turn-player :first-child { color: #ffe2ab; font: 700 .95rem/1.2 var(--fx-display); }
-.turn-player[data-next="true"] { color: #f8d89f; }
-.turn-player[data-next="true"] :first-child { color: #fff1c4; }
 
 .turn-objective {
   margin: 0;
@@ -1001,16 +999,16 @@ body {
   font-size: .69rem;
   color: #d8b787;
 }
-.reroll-setting {
+.effect-setting {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 5px;
-  margin-top: 9px;
+  margin: 0 0 3px;
   color: #edcfaa;
   font-size: .76rem;
 }
-.reroll-setting select {
+.effect-setting select {
   min-height: 44px;
   max-width: 100%;
   padding-inline: 8px;

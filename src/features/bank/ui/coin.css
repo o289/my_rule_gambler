@@ -1,0 +1,98 @@
+.coin-shell {
+  position: relative;
+  display: block;
+  width: var(--coin-size);
+  height: var(--coin-size);
+  perspective: 610px;
+}
+
+.coin-solid {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  --coin-specular: 20%;
+  --coin-half-thick: calc(var(--coin-size) * .053);
+}
+
+.coin-face {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: hidden;
+  border-radius: 50%;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.coin-front { transform: translateZ(var(--coin-half-thick)); }
+.coin-back { transform: rotateY(180deg) translateZ(var(--coin-half-thick)); }
+
+.coin-face img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+
+.coin-denomination {
+  position: absolute;
+  left: 50%;
+  top: 59%;
+  translate: -50% -50%;
+  color: #ffe1a0;
+  font: 700 calc(var(--coin-size) * .40)/1 var(--numerals, Georgia, "Times New Roman", serif);
+  text-shadow: -1px -1px 0 #64360e, 0 2px 0 #61350f, 0 0 6px #110907b7;
+}
+
+.coin-shell[data-alloy="champagne"] .coin-denomination { color: #ffecb4; }
+.coin-shell[data-alloy="royal"] .coin-denomination {
+  color: #fff1bb;
+  font-size: calc(var(--coin-size) * .34);
+  letter-spacing: -.045em;
+  text-shadow: 0 -1px #623917, 0 1px #472506, 0 2px 3px #2e1709;
+}
+.coin-sheen {
+  position: absolute;
+  inset: 2%;
+  border-radius: 50%;
+  background: linear-gradient(124deg, transparent 17%, #ffe6ae65, #fff4c673 50%, transparent 61%) var(--coin-specular, 20%) center / 215% 100%;
+  mix-blend-mode: screen;
+  opacity: .63;
+  pointer-events: none;
+}
+
+.coin-edge {
+  position: absolute;
+  z-index: -1;
+  left: 50%;
+  top: 50%;
+  width: calc(var(--coin-size) * .10);
+  height: calc(var(--coin-size) * .106);
+  transform: translate(-50%, -50%) rotateZ(var(--segment-angle)) translateY(calc(var(--coin-size) * -.490)) rotateX(90deg);
+  background:
+    repeating-linear-gradient(90deg, #5b34186e 0 1px, #f3c6798c 1px 2px, transparent 2px 2.6px),
+    linear-gradient(180deg,#edc977,#a66a2c 29%,#3e210e 51%,#b97d3a 78%,#f4c779);
+}
+
+.flight-layer, .flight-layer canvas {
+  position: absolute;
+  z-index: 8;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.flying-coin {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 9;
+  opacity: 0;
+  filter: drop-shadow(0 0 8px #f5a74085);
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+}
+
+.flying-coin .coin-solid { will-change: transform; }

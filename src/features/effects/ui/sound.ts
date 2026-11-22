@@ -147,6 +147,18 @@ export class SoundManager implements EffectAudio {
   private synthesize(effect: EffectKind, cue: Cue, reduced: boolean, at: number) {
 
     switch (effect) {
+      case 'TURN_CHANGE':
+        if (cue === 'start') this.goldChime(at, .045);
+        break;
+      case 'LOSS_NOTICE':
+        if (cue === 'place') this.weight(at, .19, .16);
+        if (cue === 'charge') this.burst(at, .32, .16, 1160, 'bandpass');
+        if (cue === 'flight') this.tone({ at, length: .56, frequency: 650, end: 296, gain: .04, attack: .14 });
+        if (cue === 'reveal') {
+          this.weight(at, .18, .17);
+          this.tone({ at, frequency: 1040, end: 810, gain: .055, length: .22, type: 'triangle' });
+        }
+        break;
       case 'DICE_STOP':
         if (cue === 'start' && !reduced) this.rollSound(at);
         if (cue === 'impact') this.weight(at, .22, .26);
@@ -162,6 +174,7 @@ export class SoundManager implements EffectAudio {
         if (cue === 'roll-stop') this.weight(at, .19, .19);
         if (cue === 'flight' && !reduced) this.tone({ at, length: .53, frequency: 310, end: 790, gain: .052, attack: .28 });
         if (cue === 'place') this.goldChime(at, .052);
+        if (cue === 'handoff') this.goldChime(at, .045);
         break;
       case 'GEM_PLACEMENT':
         if (cue === 'flight') this.tone({ at, length: .53, frequency: 310, end: 790, gain: .052, attack: .28 });

@@ -7,11 +7,17 @@ export interface EffectsAudio extends EffectAudio {
   unlock(): void;
 }
 
+interface DemoOptions {
+  reroll?: 'available' | 'blocked';
+  otherTurn?: boolean;
+  noPayment?: boolean;
+}
+
 export interface EffectsRuntime {
   player: EffectPlayer;
   audio: EffectsAudio;
   scenario: EffectScenario;
-  playDemo: (kind: EffectKind, reroll?: 'available' | 'blocked') => void;
+  playDemo: (kind: EffectKind, options?: DemoOptions) => void;
   actions: {
     playEffect: (...call: EffectCall) => void;
     replay: () => void;
@@ -58,8 +64,11 @@ export function createEffectsRuntime({
     startPlayback(read(kind, params));
   }
 
-  function playDemo(kind: EffectKind, reroll: 'available' | 'blocked' = 'available') {
-    const params = kind === 'REROLL_THROW' ? { gem: scenario.turn.rerollResults[reroll] } : scenario.demo[kind];
+  function playDemo(kind: EffectKind, options: DemoOptions = {}) {
+    let params = scenario.demo[kind];
+    if (kind === 'REROLL_THROW') params = { gem: scenario.turn.rerollResults[options.reroll ?? 'available'] };
+    if (kind === 'TURN_CHANGE' && options.otherTurn) params = { playerName: scenario.turn.nextPlayer.name, isLocal: false };
+    if (kind === 'LOSS_NOTICE' && options.noPayment) params = { ...scenario.demo.LOSS_NOTICE, paidPoints: 0 };
     startPlayback(read(kind, params));
   }
 
