@@ -7,7 +7,8 @@ import type { Cue, EffectKind } from '../../features/effects/model/effect-model'
 import {
   COMEBACK_BOARD, COMEBACK_GEM, COMEBACK_SCORE, CURRENT_PLAYER, LAST_CELL,
   rerollTargets, REROLL_RESULTS, TURN_PLAYERS,
-} from '../../features/effects/model/effect-turn';
+} from '../preview-data/effect-turn';
+import { EFFECT_PREVIEW_SCENARIO } from '../preview-data/effect-turn';
 import { SAMPLE_BOARD } from '../preview-data/sample-board';
 
 function playbackFixture() {
@@ -18,7 +19,7 @@ function playbackFixture() {
   const player = new EffectPlayer({
     cut() {},
     playCue(kind, cue) { sounded.push([kind, cue]); },
-  }, {
+  }, EFFECT_PREVIEW_SCENARIO.turn, {
     now: () => now,
     schedule(callback, delay) {
       const id = ++sequence;
@@ -60,7 +61,7 @@ test('the amethyst demo has one eligible empty +100 cell and the award makes a u
 test('the observed roll stop fires once and placement precedes reuse of the COMEBACK cues', () => {
   const { player, advance, sounded } = playbackFixture();
   const request = readEffect('ONE_CELL_COMEBACK', { gem: COMEBACK_GEM });
-  const beats = beatsFor(request, false);
+  const beats = beatsFor(request, false, EFFECT_PREVIEW_SCENARIO.turn);
   const stop = beats.find(beat => beat.cue === 'roll-stop');
   const placement = beats.find(beat => beat.cue === 'place');
   const comeback = beats.find(beat => beat.cue === 'comeback');

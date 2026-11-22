@@ -1,6 +1,5 @@
 import { useLayoutEffect, useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import { DEMO_PLAYER } from '../model/bank-model';
 import type { Coin, CoinValue } from '../model/bank-model';
 import type { BankSnapshot } from '../application/bank-player';
 import { GoldCoin } from './coin';
@@ -62,7 +61,7 @@ function CoinGroups({ wallet, renderCoin }: { wallet: readonly Coin[]; renderCoi
   );
 }
 
-export function PlayerTray({ snapshot }: { snapshot: BankSnapshot }) {
+export function PlayerTray({ snapshot, playerName }: { snapshot: BankSnapshot; playerName: string }) {
   const { wallet, balance, run, mode } = snapshot;
   const deposit = mode === 'deposit';
   const reserved = new Set(!deposit && run?.playing ? run.payment.map(coin => coin.id) : []);
@@ -70,7 +69,7 @@ export function PlayerTray({ snapshot }: { snapshot: BankSnapshot }) {
   return (
     <section className="player-area" aria-label="プレイヤーの得点と所持コイン" data-paying={Boolean(run?.playing)} data-direction={mode}>
       <div className="wallet-score" data-balance={balance}>
-        <span className="player-name">{DEMO_PLAYER.name}</span>
+        <span className="player-name">{playerName}</span>
         <div className="wallet-value">
           <Balance score={balance} animate={Boolean(run?.playing && !run.reduced)} />
           <span className="wallet-unit" aria-hidden="true">点</span>

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { BankPlayer } from '../../features/bank/application/bank-player';
-import { bankBalance, collectionPlan, DEMO_PLAYER, DEMO_RESERVE, DEMO_WALLET, readBankTransaction, selectPayment } from '../../features/bank/model/bank-model';
+import { bankBalance, collectionPlan, readBankTransaction, selectPayment } from '../../features/bank/model/bank-model';
+import { DEMO_PLAYER, DEMO_RESERVE, DEMO_WALLET } from '../preview-data/bank-demo';
 import type { BankDirection, Coin } from '../../features/bank/model/bank-model';
 
 function transaction(type: BankDirection, amount: number) {
@@ -22,7 +23,7 @@ function fixture() {
     cancel: (timer: number) => timers.delete(timer),
   };
   const audio = { cue() {}, cut() {} };
-  const bank = new BankPlayer(DEMO_PLAYER.id, DEMO_WALLET, audio, clock);
+  const bank = new BankPlayer(DEMO_PLAYER.id, DEMO_WALLET, audio, DEMO_RESERVE, clock);
   function advance(until: number) {
     for (const [id, timer] of [...timers].sort((left, right) => left[1].at - right[1].at)) {
       if (timer.at > until || !timers.delete(id)) continue;

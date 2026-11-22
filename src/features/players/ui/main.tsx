@@ -1,8 +1,8 @@
-import { memo, StrictMode, useRef, useState, useSyncExternalStore } from 'react';
+import { memo, useRef, useState, useSyncExternalStore } from 'react';
 import type { Ref } from 'react';
 import { GamblerBoard } from '../../board/ui/GamblerBoard';
 import { initialState, updateBoard } from '../../board/model/board-model';
-import { SAMPLE_BOARD } from '../../../dev/preview-data/sample-board';
+import type { BoardDefinition } from '../../board/model/board-model';
 import '../../board/ui/style.css';
 import { PlayerInfoDemoControls } from './demo-controls';
 import { ScoreChangeNotification, useScoreNotifications } from './notifications';
@@ -12,7 +12,6 @@ import type { PlayerModalHandle } from './player-modal';
 import { CrownIcon } from './vip-icons';
 import './style.css';
 
-const store = new PlayerInfoStore();
 
 export function VIPPlayersButton({ buttonRef, open, onClick }: { buttonRef: Ref<HTMLButtonElement>; open: boolean; onClick: () => void }) {
   return (
@@ -23,17 +22,17 @@ export function VIPPlayersButton({ buttonRef, open, onClick }: { buttonRef: Ref<
   );
 }
 
-const GameBoard = memo(function GameBoard() {
-  const [state, setState] = useState(() => initialState(SAMPLE_BOARD));
+const GameBoard = memo(function GameBoard({ board }: { board: BoardDefinition }) {
+  const [state, setState] = useState(() => initialState(board));
   return (
     <div className="vip-game-board">
-      <GamblerBoard board={SAMPLE_BOARD} state={state} viewportRef={null}
-        onSelect={cell => setState(current => updateBoard(SAMPLE_BOARD, current, { type: 'select-cell', cell }))} />
+      <GamblerBoard board={board} state={state} viewportRef={null}
+        onSelect={cell => setState(current => updateBoard(board, current, { type: 'select-cell', cell }))} />
     </div>
   );
 });
 
-function App() {
+function App({ board, store }: { board: BoardDefinition; store: PlayerInfoStore }) {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const { notices, clear } = useScoreNotifications(store);
   const modal = useRef<PlayerModalHandle>(null);
@@ -52,7 +51,7 @@ function App() {
         <VIPPlayersButton buttonRef={opener} open={open} onClick={() => modal.current?.open()} />
       </header>
       <h1 className="sr-only">ギャンブラー</h1>
-      <GameBoard />
+      <GameBoard board={board} />
       <PlayerInfoDemoControls store={store} snapshot={snapshot} onReset={() => { clear(); store.reset(); }} />
       <PlayerInfoModal ref={modal} snapshot={snapshot} opener={opener} onVisibilityChange={setOpen} />
       <ScoreChangeNotification notices={notices} />
@@ -60,6 +59,6 @@ function App() {
   );
 }
 
-export default function PlayersPreview() {
-  return <StrictMode><App /></StrictMode>;
+export default function PlayersScreen({ board, store }: { board: BoardDefinition; store: PlayerInfoStore }) {
+  return <App board={board} store={store} />;
 }

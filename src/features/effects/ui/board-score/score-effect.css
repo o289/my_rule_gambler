@@ -1,0 +1,74 @@
+.score-flash {
+  z-index: 3;
+  background: radial-gradient(ellipse, #ffdf8a85 0, #d67a3d65 49%, #c3863230 72%);
+  box-shadow: inset 0 0 0 1px #ffe49b, inset 0 0 13px #ffd68f8a, 0 0 16px #fbb24d9c;
+  animation: score-tile 380ms ease-out both;
+}
+
+.score-beam {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.score-beam::before {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background:
+    radial-gradient(ellipse 11% 30% at 0 50%, #fff1b8 0%, #ffe0a4b8 13%, #f6b34875 34%, transparent 100%),
+    radial-gradient(ellipse 21% 2.4% at 0 50%, #fffce2, #ffca6c95 47%, #eba14e20 84%, transparent);
+  animation: score-beam var(--beam-duration) cubic-bezier(.56, .08, .23, .98) var(--beam-delay) both;
+  content: "";
+}
+
+.score-plate[data-active="true"]::before {
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  background: radial-gradient(ellipse at 50% 44%, #ffe0a568, #ed981d2c 72%, transparent);
+  box-shadow: inset 0 0 0 2px #ffebaf, 0 0 17px #ffcc6dcc;
+  opacity: 0;
+  animation: score-plate var(--plate-duration) ease-out var(--plate-delay) both;
+  content: "";
+}
+
+.score-plate[data-active="true"] .score-value {
+  animation: score-number var(--plate-duration) ease-out var(--plate-delay) both;
+}
+
+@keyframes score-tile {
+  0% { opacity: 0; transform: scale(.94); }
+  29% { opacity: .9; }
+  100% { opacity: 0; transform: scale(1.04); }
+}
+
+@keyframes score-beam {
+  0% { opacity: 0; transform: translateX(95%); }
+  22% { opacity: .97; }
+  83% { opacity: .9; }
+  100% { opacity: 0; transform: translateX(6%); }
+}
+
+@keyframes score-plate {
+  0%, 100% { opacity: 0; }
+  20% { opacity: 1; }
+}
+
+@keyframes score-number {
+  0%, 100% { transform: scale(1); }
+  20% {
+    color: #fffbe0;
+    text-shadow: 0 0 10px #ffcd62;
+    transform: scale(1.15);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .score-flash, .score-beam::before,
+  .score-plate[data-active="true"]::before, .score-plate[data-active="true"] .score-value { animation: none; }
+  .score-flash, .score-plate[data-active="true"]::before { opacity: .65; }
+  .score-plate[data-active="true"] .score-value { color: #fff5ce; }
+}

@@ -38,15 +38,6 @@ function wallet(fifty: number, ten: number): readonly CoinBundle[] {
   return [{ denomination: 50, count: fifty }, { denomination: 10, count: ten }];
 }
 
-const DEMO_PLAYERS: readonly PlayerSeed[] = [
-  { id: 'player-1', name: 'PLAYER 1', turnOrder: 1, remainingDice: 5, coins: wallet(6, 2) },
-  { id: 'player-2', name: 'PLAYER 2', turnOrder: 2, remainingDice: 4, coins: wallet(5, 2) },
-  { id: 'player-3', name: 'PLAYER 3', turnOrder: 3, remainingDice: 3, coins: wallet(6, 2) },
-  { id: 'player-4', name: 'PLAYER 4', turnOrder: 4, remainingDice: 2, coins: wallet(3, 3) },
-  { id: 'player-5', name: 'PLAYER 5', turnOrder: 5, remainingDice: 1, coins: wallet(2, 2) },
-  { id: 'player-6', name: 'PLAYER 6', turnOrder: 6, remainingDice: 0, coins: wallet(1, 3) },
-];
-
 export function scoreCoins(coins: readonly CoinBundle[]) {
   return coins.reduce((total, coin) => total + coin.denomination * coin.count, 0);
 }
@@ -78,7 +69,7 @@ export class PlayerInfoStore {
   private readonly scoreListeners = new Set<ScoreListener>();
   private changeId = 0;
 
-  constructor(private readonly seed: readonly PlayerSeed[] = DEMO_PLAYERS) {
+  constructor(private readonly seed: readonly PlayerSeed[]) {
     if (seed.length < MIN_PLAYERS || seed.length > MAX_PLAYERS || new Set(seed.map(player => player.id)).size !== seed.length) {
       throw new RangeError('プレイヤーは異なる ID で2〜6人指定してください。');
     }

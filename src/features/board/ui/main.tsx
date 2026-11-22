@@ -3,10 +3,10 @@ import type { FormEvent } from 'react';
 import { GamblerBoard } from './GamblerBoard';
 import { cellKey, formatScore, initialState, updateBoard } from '../model/board-model';
 import type { BoardAction, BoardDefinition } from '../model/board-model';
-import { REDUCED_SCORE_MS, scoreTimings } from './board-motion';
+import { REDUCED_SCORE_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
 import { GEMS, GEM_IDS } from '../model/gems';
-import { SAMPLE_BOARD } from '../../../dev/preview-data/sample-board';
 import './style.css';
+import '../../effects/ui/board-score/score-effect.css';
 
 const MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 const NARROW_QUERY = '(max-width: 920px)';
@@ -157,6 +157,6 @@ function App({ board }: { board: BoardDefinition }) {
   );
 }
 
-export default function BoardPreview() {
-  return <StrictMode><App board={SAMPLE_BOARD} /></StrictMode>;
+export default function BoardPreview({ board }: { board: BoardDefinition }) {
+  return <StrictMode><App board={board} /></StrictMode>;
 }

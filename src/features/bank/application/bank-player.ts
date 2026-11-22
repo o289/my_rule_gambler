@@ -1,4 +1,4 @@
-import { bankBalance, collectionPlan, DEMO_RESERVE, readBankTransaction, selectPayment, transferCoins } from '../model/bank-model';
+import { bankBalance, collectionPlan, readBankTransaction, selectPayment, transferCoins } from '../model/bank-model';
 import type { BankBeat, BankCue, BankDirection, BankTransaction, Coin } from '../model/bank-model';
 
 export interface Flight {
@@ -57,8 +57,8 @@ export class BankPlayer {
     private playerId: string,
     private initialWallet: readonly Coin[],
     private audio: BankAudioPort,
+    private initialReserve: readonly Coin[],
     private clock = browserClock,
-    private initialReserve: readonly Coin[] = DEMO_RESERVE,
   ) {
     const coins = [...initialWallet, ...initialReserve];
     if (new Set(coins.map(coin => coin.id)).size !== coins.length) {

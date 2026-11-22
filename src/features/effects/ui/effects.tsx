@@ -1,13 +1,10 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
-import { SAMPLE_BOARD } from '../../../dev/preview-data/sample-board';
 import { GEMS } from '../../board/model/gems';
 import { GemDie3D } from '../../dice/ui/3d/GemDie3D';
 import { BoardScene, ConvergingLights, GemFlight, locateCell } from './board-scene';
-import { FEATURED_CELL, rankOrder } from '../model/effect-model';
-import type { EffectKind, EffectParams, EffectRequest } from '../model/effect-model';
-import { COMEBACK_GEM, NEXT_PLAYER, rerollTargets, TURN_COMEBACK_RANK } from '../model/effect-turn';
-import { player } from '../application/effects-api';
+import { rankOrder } from '../model/effect-model';
+import type { EffectKind, EffectParams, EffectRequest, EffectScenario } from '../model/effect-model';
 import { TurnScene } from './turn-scene';
 import { reached } from '../application/effect-player';
 import type { EffectPlayback } from '../application/effect-player';
@@ -23,6 +20,8 @@ interface SharedSceneProps {
   stage: RefObject<HTMLDivElement | null>;
 }
 
+interface ScenarioSceneProps extends SharedSceneProps { scenario: EffectScenario }
+
 export function DiceStopEffect({ playback, params }: SharedSceneProps & { params: EffectParams['DICE_STOP'] }) {
   return (
     <div className="dice-scene">
@@ -35,7 +34,7 @@ export function DiceStopEffect({ playback, params }: SharedSceneProps & { params
   );
 }
 
-export function GemPlacementEffect({ playback, params, stage }: SharedSceneProps & { params: EffectParams['GEM_PLACEMENT'] }) {
+export function GemPlacementEffect({ playback, params, stage, scenario }: ScenarioSceneProps & { params: EffectParams['GEM_PLACEMENT'] }) {
   const board = useRef<HTMLElement>(null);
   const source = useRef<HTMLDivElement>(null);
   const [landing, setLanding] = useState<Point>();
@@ -49,7 +48,7 @@ export function GemPlacementEffect({ playback, params, stage }: SharedSceneProps
 
   return (
     <>
-      <BoardScene viewportRef={board} target={params.target} placed={placed ? params.gem : undefined} tone="gold" />
+      <BoardScene viewportRef={board} definition={scenario.board} target={params.target} placed={placed ? params.gem : undefined} tone="gold" />
       <div className="placement-source" ref={source} data-spent={placed || (launched && animate)} aria-hidden="true">
         <img src={GEMS[params.gem].image} alt="" />
       </div>
@@ -63,11 +62,11 @@ function TitleFlourish() {
   return <img src={filigree} className="title-flourish" alt="" aria-hidden="true" />;
 }
 
-export function BigWinEffect({ playback, params, stage }: SharedSceneProps & { params: EffectParams['BIG_WIN'] }) {
-  const target = params.target ?? FEATURED_CELL;
+export function BigWinEffect({ playback, params, stage, scenario }: ScenarioSceneProps & { params: EffectParams['BIG_WIN'] }) {
+  const target = params.target ?? scenario.featuredCell;
   const board = useRef<HTMLElement>(null);
   const [focusPoint, setFocusPoint] = useState<Point>();
-  const gem = SAMPLE_BOARD.columns.find(column => column.id === target.columnId)?.gem ?? 'amethyst';
+  const gem = scenario.board.columns.find(column => column.id === target.columnId)?.gem ?? 'amethyst';
   const impact = reached(playback, 'impact');
   const active = playback.playing && !playback.reduced;
   const focused = reached(playback, 'focus');
@@ -78,7 +77,7 @@ export function BigWinEffect({ playback, params, stage }: SharedSceneProps & { p
   }, [stage, target, focused]);
   return (
     <>
-      <BoardScene viewportRef={board} target={target} placed={gem} tone={playback.phase === 'start' ? undefined : 'gold'} />
+      <BoardScene viewportRef={board} definition={scenario.board} target={target} placed={gem} tone={playback.phase === 'start' ? undefined : 'gold'} />
       <div className="big-vignette" aria-hidden="true" />
       {!impact && <div className="big-charge" data-phase={playback.phase} style={focusPoint ? { left: focusPoint.x, top: focusPoint.y } : undefined} aria-hidden="true" />}
       {active && focusPoint && reached(playback, 'gather') && !reached(playback, 'silence') && <ConvergingLights stage={stage} board={board} target={focusPoint} />}
@@ -166,16 +165,16 @@ export function ComebackEffect({ playback, params, stage }: SharedSceneProps & {
   );
 }
 
-export function JackpotVictoryEffect({ playback, params, stage }: SharedSceneProps & { params: EffectParams['JACKPOT_VICTORY'] }) {
+export function JackpotVictoryEffect({ playback, params, stage, scenario }: ScenarioSceneProps & { params: EffectParams['JACKPOT_VICTORY'] }) {
   const board = useRef<HTMLElement>(null);
-  const target = params.target ?? FEATURED_CELL;
+  const target = params.target ?? scenario.featuredCell;
   const impact = reached(playback, 'impact');
   const revealed = reached(playback, 'reveal');
   const active = playback.playing && !playback.reduced;
   useScreenShake(stage, active && impact, true);
   return (
     <>
-      <BoardScene viewportRef={board} target={target} placed={params.gem} tone="gem" />
+      <BoardScene viewportRef={board} definition={scenario.board} target={target} placed={params.gem} tone="gem" />
       <div className="jackpot-vignette" data-phase={playback.phase} aria-hidden="true" />
       {active && reached(playback, 'gather') && !reached(playback, 'silence') && <ConvergingLights stage={stage} board={board} />}
       {!impact && reached(playback, 'gather') && <div className="jackpot-energy" data-phase={playback.phase} aria-hidden="true" />}
@@ -204,35 +203,35 @@ export function JackpotVictoryEffect({ playback, params, stage }: SharedScenePro
   );
 }
 
-export function EffectScene({ playback, stage }: SharedSceneProps) {
+export function EffectScene({ playback, stage, scenario, settleRoll }: ScenarioSceneProps & { settleRoll: (id: number) => void }) {
   const { request } = playback;
   switch (request.kind) {
     case 'DICE_STOP': return <DiceStopEffect playback={playback} params={request.params} stage={stage} />;
-    case 'GEM_PLACEMENT': return <GemPlacementEffect playback={playback} params={request.params} stage={stage} />;
-    case 'BIG_WIN': return <BigWinEffect playback={playback} params={request.params} stage={stage} />;
+    case 'GEM_PLACEMENT': return <GemPlacementEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
+    case 'BIG_WIN': return <BigWinEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
     case 'ONE_CELL_COMEBACK': {
-      const ranking = request.params.gem === COMEBACK_GEM && reached(playback, 'comeback');
+      const ranking = request.params.gem === scenario.turn.comebackGem && reached(playback, 'comeback');
       return <>
-        <TurnScene playback={playback} request={request} stage={stage} settleRoll={id => player.settleRoll(id)} ranking={ranking} />
-        {ranking && <ComebackEffect playback={playback} params={TURN_COMEBACK_RANK} stage={stage} />}
+        <TurnScene playback={playback} request={request} stage={stage} scenario={scenario.turn} settleRoll={settleRoll} ranking={ranking} />
+        {ranking && <ComebackEffect playback={playback} params={scenario.turn.comebackRank} stage={stage} />}
       </>;
     }
     case 'REROLL_THROW':
-      return <TurnScene playback={playback} request={request} stage={stage} settleRoll={id => player.settleRoll(id)} />;
+      return <TurnScene playback={playback} request={request} stage={stage} scenario={scenario.turn} settleRoll={settleRoll} />;
     case 'COMEBACK': return <ComebackEffect playback={playback} params={request.params} stage={stage} />;
-    case 'JACKPOT_VICTORY': return <JackpotVictoryEffect playback={playback} params={request.params} stage={stage} />;
+    case 'JACKPOT_VICTORY': return <JackpotVictoryEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
   }
 }
 
-export function outcome({ kind, params }: EffectRequest) {
+export function outcome({ kind, params }: EffectRequest, scenario: EffectScenario) {
   switch (kind) {
     case 'DICE_STOP': return GEMS[params.gem].name;
     case 'GEM_PLACEMENT': return `${GEMS[params.gem].name}を配置しました`;
     case 'BIG_WIN': return `${params.playerName}　+${params.points.toLocaleString('ja-JP')}点`;
     case 'ONE_CELL_COMEBACK':
-      return params.gem === COMEBACK_GEM ? `${TURN_COMEBACK_RANK.playerName}　${TURN_COMEBACK_RANK.fromRank}位 → 1位` : `${GEMS[params.gem].name}　逆転ならず`;
+      return params.gem === scenario.turn.comebackGem ? `${scenario.turn.comebackRank.playerName}　${scenario.turn.comebackRank.fromRank}位 → ${scenario.turn.comebackRank.toRank}位` : `${GEMS[params.gem].name}　逆転ならず`;
     case 'REROLL_THROW':
-      return rerollTargets(params.gem).length ? `${GEMS[params.gem].name}を配置可能` : `配置できるマスなし · ${NEXT_PLAYER.name} の手番`;
+      return scenario.turn.rerollTargets(params.gem).length ? `${GEMS[params.gem].name}を配置可能` : `配置できるマスなし · ${scenario.turn.nextPlayer.name} の手番`;
     case 'COMEBACK': return `${params.playerName}　${params.fromRank}位 → ${params.toRank}位`;
     case 'JACKPOT_VICTORY': return `勝者　${params.playerName}`;
   }

@@ -1,49 +1,80 @@
-import { REROLL_RESULTS } from '../model/effect-turn';
-import { DEMO, readEffect } from '../model/effect-model';
-import type { EffectCall, EffectKind } from '../model/effect-model';
+import { readEffect } from '../model/effect-model';
+import type { EffectCall, EffectKind, EffectScenario } from '../model/effect-model';
 import { EffectPlayer } from './effect-player';
-import { SoundManager } from '../ui/sound';
-import { preloadDice } from '../../dice/ui/face-canvases';
+import type { EffectAudio } from './effect-player';
 
-export const sound = new SoundManager();
-export const player = new EffectPlayer(sound);
-const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
-let playSequence = 0;
+export interface EffectsAudio extends EffectAudio {
+  unlock(): void;
+}
 
-function startPlayback(request: ReturnType<typeof readEffect>) {
-  const sequence = ++playSequence;
-  const start = () => {
-    if (sequence === playSequence) player.play(request, reduceMotion());
+export interface EffectsRuntime {
+  player: EffectPlayer;
+  audio: EffectsAudio;
+  scenario: EffectScenario;
+  playDemo: (kind: EffectKind, reroll?: 'available' | 'blocked') => void;
+  actions: {
+    playEffect: (...call: EffectCall) => void;
+    replay: () => void;
+    skip: () => void;
+    reset: () => void;
   };
-  if (request.kind === 'DICE_STOP') {
-    player.reset();
-    void preloadDice().then(start, start);
-    return;
+}
+
+export function createEffectsRuntime({
+  audio,
+  scenario,
+  preloadDice,
+  reducedMotion,
+}: {
+  audio: EffectsAudio;
+  scenario: EffectScenario;
+  preloadDice: () => Promise<unknown>;
+  reducedMotion: () => boolean;
+}): EffectsRuntime {
+  const player = new EffectPlayer(audio, scenario.turn);
+  let playSequence = 0;
+
+  function startPlayback(request: ReturnType<typeof readEffect>) {
+    const sequence = ++playSequence;
+    const start = () => {
+      if (sequence === playSequence) player.play(request, reducedMotion());
+    };
+    if (request.kind === 'DICE_STOP') {
+      player.reset();
+      void preloadDice().then(start, start);
+      return;
+    }
+    if (request.kind === 'ONE_CELL_COMEBACK' || request.kind === 'REROLL_THROW') {
+      void preloadDice().catch(() => undefined);
+    }
+    start();
   }
-  if (request.kind === 'ONE_CELL_COMEBACK' || request.kind === 'REROLL_THROW') {
-    void preloadDice().catch(() => undefined);
+
+  function read(kind: unknown, params: unknown) {
+    return readEffect(kind, params, { board: scenario.board, featuredCell: scenario.featuredCell });
   }
-  start();
-}
 
-export function playEffect(...[kind, params]: EffectCall) {
-  startPlayback(readEffect(kind, params));
-}
+  function playEffect(...[kind, params]: EffectCall) {
+    startPlayback(read(kind, params));
+  }
 
-export function playDemo(kind: EffectKind, reroll: keyof typeof REROLL_RESULTS = 'available') {
-  const params = kind === 'REROLL_THROW' ? { gem: REROLL_RESULTS[reroll] } : DEMO[kind];
-  startPlayback(readEffect(kind, params));
-}
+  function playDemo(kind: EffectKind, reroll: 'available' | 'blocked' = 'available') {
+    const params = kind === 'REROLL_THROW' ? { gem: scenario.turn.rerollResults[reroll] } : scenario.demo[kind];
+    startPlayback(read(kind, params));
+  }
 
-export const effectActions = {
-  playEffect,
-  replay: () => {
-    const snapshot = player.getSnapshot();
-    if (snapshot) startPlayback(snapshot.request);
-  },
-  skip: () => player.skip(),
-  reset: () => {
-    playSequence += 1;
-    player.reset();
-  },
-};
+  const actions: EffectsRuntime['actions'] = {
+    playEffect,
+    replay: () => {
+      const snapshot = player.getSnapshot();
+      if (snapshot) startPlayback(snapshot.request);
+    },
+    skip: () => player.skip(),
+    reset: () => {
+      playSequence += 1;
+      player.reset();
+    },
+  };
+
+  return { player, audio, scenario, playDemo, actions };
+}

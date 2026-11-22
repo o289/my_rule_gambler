@@ -1,29 +1,25 @@
 import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
 import { StrictMode, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
+import type { EffectsRuntime } from '../application/effects-api';
 import '../../board/ui/style.css';
 import './style.css';
 import { BoardScene } from './board-scene';
 import { EFFECT_LABELS } from '../model/effect-model';
 import type { EffectKind } from '../model/effect-model';
 import { EffectScene, EFFECT_ICONS, outcome } from './effects';
-import { effectActions as api, playDemo, player, sound } from '../application/effects-api';
 
 const keys: EffectKind[] = ['DICE_STOP', 'GEM_PLACEMENT', 'BIG_WIN', 'COMEBACK', 'JACKPOT_VICTORY', 'ONE_CELL_COMEBACK', 'REROLL_THROW'];
 
-declare global {
-  interface Window { gamblerEffects: typeof api; }
-}
-window.gamblerEffects = Object.freeze(api);
-
-function App() {
-  useAudioActivation(sound.unlock);
-  const playback = useSyncExternalStore(player.subscribe, player.getSnapshot);
+function App({ runtime }: { runtime: EffectsRuntime }) {
+  useAudioActivation(runtime.audio.unlock);
+  const playback = useSyncExternalStore(runtime.player.subscribe, runtime.player.getSnapshot);
   const stage = useRef<HTMLDivElement>(null);
+  const scenario = runtime.scenario;
   const current = playback?.request.kind;
   const [reroll, setReroll] = useState<'available' | 'blocked'>('available');
   const status = playback ? (playback.playing ? '再生中' : '演出完了') : '準備完了';
-  const subtitle = playback && !playback.playing ? outcome(playback.request) : (current ? EFFECT_LABELS[current] : '演出を選んで再生');
+  const subtitle = playback && !playback.playing ? outcome(playback.request, scenario) : (current ? EFFECT_LABELS[current] : '演出を選んで再生');
   const progress: (CSSProperties & { '--play-duration': string }) | undefined = playback && { '--play-duration': `${playback.duration}ms` } || undefined;
 
   function showStage() {
@@ -55,7 +51,8 @@ function App() {
           <div className="effect-stage" ref={stage} data-effect={current ?? 'IDLE'} data-phase={playback?.phase ?? 'idle'}>
             <div className="stage-surface" aria-hidden="true" />
             <div className="stage-corners" aria-hidden="true"><i /><i /><i /><i /></div>
-            {playback ? <EffectScene key={playback.id} playback={playback} stage={stage} /> : <BoardScene />}
+            {playback ? <EffectScene key={playback.id} playback={playback} stage={stage} scenario={scenario}
+              settleRoll={id => runtime.player.settleRoll(id)} /> : <BoardScene definition={scenario.board} />}
           </div>
           <div className="stage-footer">
             {playback && <div className="progress-rail" aria-hidden="true">
@@ -66,9 +63,9 @@ function App() {
               <strong>{subtitle}</strong>
             </div>
             <div className="transport" aria-label="再生操作">
-              <button type="button" onClick={() => { showStage(); api.replay(); }} disabled={!playback}>リプレイ</button>
-              <button type="button" onClick={api.skip} disabled={!playback?.playing}>スキップ</button>
-              <button type="button" onClick={api.reset}>リセット</button>
+              <button type="button" onClick={() => { showStage(); runtime.actions.replay(); }} disabled={!playback}>リプレイ</button>
+              <button type="button" onClick={runtime.actions.skip} disabled={!playback?.playing}>スキップ</button>
+              <button type="button" onClick={runtime.actions.reset}>リセット</button>
             </div>
           </div>
         </section>
@@ -77,7 +74,7 @@ function App() {
           <h2 id="controls-title">演出を再生</h2>
           <div className="effect-buttons">
             {keys.map(kind => (
-              <button key={kind} type="button" data-effect-button={kind} aria-pressed={current === kind} onClick={() => { showStage(); playDemo(kind, reroll); }}>
+              <button key={kind} type="button" data-effect-button={kind} aria-pressed={current === kind} onClick={() => { showStage(); runtime.playDemo(kind, reroll); }}>
                 <span className="effect-icon" aria-hidden="true">{EFFECT_ICONS[kind]}</span>
                 <span>{EFFECT_LABELS[kind]}{kind === 'REROLL_THROW' && <small>続ける</small>}</span>
                 <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true"><path d="m4 2 5 4-5 4Z" fill="currentColor" /></svg>
@@ -97,6 +94,6 @@ function App() {
   );
 }
 
-export default function EffectsPreview() {
-  return <StrictMode><App /></StrictMode>;
+export default function EffectsScreen({ runtime }: { runtime: EffectsRuntime }) {
+  return <StrictMode><App runtime={runtime} /></StrictMode>;
 }

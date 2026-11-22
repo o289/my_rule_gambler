@@ -2,11 +2,9 @@ import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { GamblerBoard } from '../../board/ui/GamblerBoard';
-import { cellKey, initialState } from '../../board/model/board-model';
+import type { BoardDefinition, BoardState, CellAddress } from '../../board/model/board-model';
 import { GEMS } from '../../board/model/gems';
-import { SAMPLE_BOARD } from '../../../dev/preview-data/sample-board';
 import '../../board/ui/style.css';
-import { boardCellKey } from '../model/geometry';
 import type { GemId } from '../model/geometry';
 import type { DiceResult, GameState, RollView } from '../../../shared/contracts/dice';
 import { DiceConnection } from './connection';
@@ -19,13 +17,21 @@ import './style.css';
 
 const loadTray = () => import('./3d/tray-scene');
 const TrayScene = lazy(loadTray);
-const params = new URLSearchParams(location.search);
-const connection = new DiceConnection(params.get('dev') === '1', params.get('room') ?? 'salon');
-const audio = new DiceSound();
-const cupSound = () => audio.cue('cup');
-const boardTemplate = { ...SAMPLE_BOARD, rows: SAMPLE_BOARD.rows.map(row => ({ id: row.id, score: row.score })) };
-const idleBoard = initialState(boardTemplate);
-const noPlacements = [] as const;
+
+export interface DiceBoardContext {
+  game: GameState | null;
+  roll: RollView | null;
+  selected: DiceResult | undefined;
+  canAct: boolean;
+  inPlacement: boolean;
+  board: BoardState;
+}
+
+export interface DiceBoardAdapter {
+  definition: BoardDefinition;
+  createState: (game: GameState | null, active: DiceResult | undefined) => BoardState;
+  onSelect: (cell: CellAddress, context: DiceBoardContext) => void;
+}
 
 function DiceIcon({ gem }: { gem: GemId }) {
   return <img src={GEMS[gem].image} alt="" draggable={false} />;
@@ -50,12 +56,14 @@ function ResultStrip({ list, action, chosen, remaining }: {
   </ol>;
 }
 
-function TrayDialog({ info, setFps, children, onClose, focusTarget }: {
+function TrayDialog({ info, setFps, children, onClose, focusTarget, stream, onCup }: {
   info: ConnectionView;
   setFps: (fps: number | null) => void;
   children: ReactNode;
   onClose: (id: string) => void;
   focusTarget: () => HTMLElement | null;
+  stream: DiceConnection['frames'];
+  onCup: () => void;
 }) {
   const shell = useRef<HTMLDialogElement>(null);
   const [visible, setVisible] = useState(false);
@@ -98,7 +106,7 @@ function TrayDialog({ info, setFps, children, onClose, focusTarget }: {
           <span className="tray-status" role="status">{info.status !== 'online' ? '接続を再開しています…' : label}</span>
         </header>
         <Suspense fallback={<div className="tray-visual"><p className="tray-problem">3Dトレイを準備しています…</p></div>}>
-          <TrayScene stream={connection.frames} roll={roll} onFps={setFps} onCup={cupSound} />
+          <TrayScene stream={stream} roll={roll} onFps={setFps} onCup={onCup} />
         </Suspense>
         <div className="tray-result" data-settled={ready}>
           {ready ? <ResultStrip list={roll.results} /> : <p>すべてのダイスが止まると出目が表示されます。</p>}
@@ -113,28 +121,13 @@ function TrayDialog({ info, setFps, children, onClose, focusTarget }: {
   </dialog>;
 }
 
-function tableState(game: GameState | null, active: DiceResult | undefined) {
-  const occupied = new Map(idleBoard.occupied);
-  const placements = game?.placements ?? noPlacements;
-  const slots = new Set(placements.map(item => boardCellKey(item.row, item.column)));
-  for (const { row, column, gem } of placements) {
-    const rowId = boardTemplate.rows[row]?.id;
-    const columnId = boardTemplate.columns[column]?.id;
-    if (rowId && columnId) occupied.set(cellKey({ rowId, columnId }), gem);
-  }
-  const selection = active ? boardTemplate.rows.flatMap((row, rowIndex) => {
-    const next = boardTemplate.columns.findIndex((_, column) => !slots.has(boardCellKey(rowIndex, column)));
-    const column = boardTemplate.columns[next];
-    return column?.gem === active.gem ? [{ rowId: row.id, columnId: column.id }] : [];
-  })[0] ?? null : null;
-  return { ...idleBoard, occupied, selection };
-}
-
 function focusTarget() {
   return document.querySelector<HTMLElement>('#turn-commands button:enabled') ?? document.querySelector<HTMLElement>('#turn-commands');
 }
 
-function App() {
+function App({ connection, boardAdapter }: { connection: DiceConnection; boardAdapter: DiceBoardAdapter }) {
+  const [audio] = useState(() => new DiceSound());
+  const cupSound = () => audio.cue('cup');
   useAudioActivation(audio.unlock);
   const info = useSyncExternalStore(connection.subscribe, connection.getSnapshot);
   const { game, roll } = info;
@@ -148,7 +141,7 @@ function App() {
     const remaining = game?.results.filter(result => game.remaining.includes(result.id));
     return remaining?.find(result => result.id === selectedId) ?? remaining?.[0];
   }, [game, selectedId]);
-  const board = useMemo(() => tableState(game, own && inPlacement ? selected : undefined), [game, own, inPlacement, selected]);
+  const board = useMemo(() => boardAdapter.createState(game, own && inPlacement ? selected : undefined), [boardAdapter, game, own, inPlacement, selected]);
 
   useEffect(() => {
     let previousTray: string | null = null;
@@ -177,14 +170,6 @@ function App() {
     if (connection.confirm(id)) audio.cue('confirm');
   }
 
-  function commandCell(rowId: string, columnId: string) {
-    if (!canAct || !inPlacement || !roll || !selected) return;
-    const row = boardTemplate.rows.findIndex(item => item.id === rowId);
-    const next = boardTemplate.columns.find(column => !board.occupied.has(cellKey({ rowId, columnId: column.id })));
-    if (row < 0 || next?.id !== columnId || next.gem !== selected.gem) return;
-    connection.send({ type: 'place', row, rollId: roll.id, dieId: selected.id });
-  }
-
   const seat = game?.seats.find(item => item.id === info.playerId);
   const current = game?.seats.find(item => item.id === game.turnId);
   const devReroll = Boolean(info.dev && game && !game.placedThisRoll);
@@ -199,7 +184,8 @@ function App() {
     <div className="salon-title"><h1>宝石サイコロ 3D</h1><span role="status">{seat?.name ?? (info.status === 'offline' ? '再接続中' : '接続中')} {seat && (own ? '・あなたの手番' : current ? `・${current.name} の手番` : '')}</span></div>
     <div className="table-layout">
       <div className="game-board">
-        <GamblerBoard board={boardTemplate} state={board} viewportRef={null} onSelect={cell => commandCell(cell.rowId, cell.columnId)} />
+        <GamblerBoard board={boardAdapter.definition} state={board} viewportRef={null}
+          onSelect={cell => boardAdapter.onSelect(cell, { game, roll, selected, canAct, inPlacement, board })} />
       </div>
       <aside className="turn-card" aria-labelledby="turn-title">
         <div className="turn-heading"><h2 id="turn-title">ダイス操作</h2><span>{game?.seats.filter(item => item.online).length ?? 0}人 接続</span></div>
@@ -231,8 +217,10 @@ function App() {
       </aside>
     </div>
     {!info.tray && perf}
-    <TrayDialog info={info} setFps={setFps} onClose={confirm} focusTarget={focusTarget}>{info.tray && perf}</TrayDialog>
+    <TrayDialog info={info} setFps={setFps} onClose={confirm} focusTarget={focusTarget} stream={connection.frames} onCup={cupSound}>{info.tray && perf}</TrayDialog>
   </main>;
 }
 
-export default App;
+export default function DiceScreen({ connection, boardAdapter }: { connection: DiceConnection; boardAdapter: DiceBoardAdapter }) {
+  return <App connection={connection} boardAdapter={boardAdapter} />;
+}

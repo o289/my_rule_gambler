@@ -1,19 +1,17 @@
 import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
-import { StrictMode, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
-import { audio, bank, bankActions as api } from '../application/bank-api';
-import { BANK_AMOUNT_STEP, bankBalance, DEFAULT_BANK_AMOUNT, DEMO_PLAYER, DEMO_RESERVE, DEMO_WALLET, selectPayment, VAULT_DOOR_MS } from '../model/bank-model';
+import type { BankPlayer } from '../application/bank-player';
+import type { BankActions } from '../application/bank-api';
+import { BANK_AMOUNT_STEP, bankBalance, DEFAULT_BANK_AMOUNT, selectPayment, VAULT_DOOR_MS } from '../model/bank-model';
 import type { BankCue, BankDirection, Coin } from '../model/bank-model';
 import { CoinFlights } from './coin-flight';
 import { PlayerTray } from './tray';
 import { Vault } from './vault';
 import './style.css';
 
-declare global {
-  interface Window { gamblerBank: typeof api; }
-}
-
-window.gamblerBank = Object.freeze(api);
+export interface BankDemoData { playerId: string; playerName: string; initialWallet: readonly Coin[]; initialReserve: readonly Coin[]; }
+export interface BankScreenProps { bank: BankPlayer; audio: { unlock(): void }; api: BankActions; demo: BankDemoData; }
 
 const STAGE_STATUS: Record<BankCue, string> = {
   confirm: '支払い確定',
@@ -48,7 +46,7 @@ function summarize(coins: readonly Coin[]) {
   return [...grouped.entries()].map(([value, count]) => `${value}点コイン × ${count}枚`).join('、');
 }
 
-function App() {
+function App({ bank, audio, api, demo }: BankScreenProps) {
   useAudioActivation(audio.unlock);
   const snapshot = useSyncExternalStore(bank.subscribe, bank.getSnapshot);
   const { run, mode } = snapshot;
@@ -56,7 +54,7 @@ function App() {
   const [amount, setAmount] = useState(String(DEFAULT_BANK_AMOUNT));
   const activeAmount = run?.playing ? String(run.transaction.amount) : amount;
   const points = Number(activeAmount);
-  const startingCoins = mode === 'withdraw' ? DEMO_WALLET : DEMO_RESERVE;
+  const startingCoins = mode === 'withdraw' ? demo.initialWallet : demo.initialReserve;
   const source = run ? startingCoins : mode === 'withdraw' ? snapshot.wallet : snapshot.reserve;
   const limit = bankBalance(source);
   const completedAmount = run && !run.playing ? run.transaction.amount : null;
@@ -86,7 +84,7 @@ function App() {
     const current = bank.getSnapshot();
     if (!canPay || current.mode !== mode || current.run?.playing || current.run?.transaction.amount === points) return;
     if (current.run) api.reset();
-    if (api.playBankTransaction({ type: mode, playerId: DEMO_PLAYER.id, amount: points })) showStage();
+    if (api.playBankTransaction({ type: mode, playerId: demo.playerId, amount: points })) showStage();
   }
 
   function replay() {
@@ -116,7 +114,7 @@ function App() {
           <div className="bank-stage" ref={stage} data-cue={run?.cue ?? 'idle'} data-direction={mode} data-playing={Boolean(run?.playing)}>
             <div className="bank-matte" aria-hidden="true"><i /><i /><i /><i /></div>
             <Vault key={`vault-${run?.id ?? 'idle'}`} run={run} />
-            <PlayerTray key={`tray-${run?.id ?? 'idle'}`} snapshot={snapshot} />
+            <PlayerTray key={`tray-${run?.id ?? 'idle'}`} snapshot={snapshot} playerName={demo.playerName} />
             {run && !run.reduced && <CoinFlights stage={stage} flights={run.flights} direction={run.transaction.type} />}
           </div>
           <div className="bank-footer">
@@ -170,6 +168,6 @@ function App() {
   );
 }
 
-export default function BankPreview() {
-  return <StrictMode><App /></StrictMode>;
+export default function BankScreen(props: BankScreenProps) {
+  return <App {...props} />;
 }

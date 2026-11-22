@@ -2,14 +2,12 @@ import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import type { Ref, RefObject } from 'react';
 import { GamblerBoard } from '../../board/ui/GamblerBoard';
 import { cellKey, initialState } from '../../board/model/board-model';
-import { SAMPLE_BOARD } from '../../../dev/preview-data/sample-board';
 import type { BoardDefinition, CellAddress } from '../../board/model/board-model';
 import { GEMS, GEM_IDS } from '../../board/model/gems';
 import type { GemId } from '../../board/model/gems';
 import { centerWithin } from './visuals';
 import type { Point } from './visuals';
 
-const initialBoard = initialState(SAMPLE_BOARD);
 const noSelection = () => undefined;
 
 export function locateCell(board: HTMLElement | null, target?: CellAddress) {
@@ -20,16 +18,16 @@ export function locateCell(board: HTMLElement | null, target?: CellAddress) {
 interface BoardSceneProps {
   viewportRef?: Ref<HTMLElement>;
   target?: CellAddress;
-  definition?: BoardDefinition;
+  definition: BoardDefinition;
   turnCue?: { cells: readonly CellAddress[]; tone: 'aim' | 'available'; pulse: boolean };
   placed?: GemId;
   tone?: 'gold' | 'gem';
 }
 
-export const BoardScene = memo(function BoardScene({ viewportRef, target, definition = SAMPLE_BOARD, turnCue, placed, tone }: BoardSceneProps) {
+export const BoardScene = memo(function BoardScene({ viewportRef, target, definition, turnCue, placed, tone }: BoardSceneProps) {
   const board = useRef<HTMLElement>(null);
   const state = useMemo(() => {
-    const base = definition === SAMPLE_BOARD ? initialBoard : initialState(definition);
+    const base = initialState(definition);
     const occupied = new Map(base.occupied);
     if (target) {
       const key = cellKey(target);

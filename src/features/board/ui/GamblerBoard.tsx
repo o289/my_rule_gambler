@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, Ref } from 'react';
 import type { BoardDefinition, BoardState, CellAddress } from '../model/board-model';
 import { cellKey, formatScore } from '../model/board-model';
-import { SCORE_BEAM_MS, SCORE_PLATE_MS, SCORE_STAGGER_MS, scoreTimings } from './board-motion';
+import { SCORE_BEAM_MS, SCORE_PLATE_MS, SCORE_STAGGER_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
 import { GEMS } from '../model/gems';
 import type { GemId } from '../model/gems';
 

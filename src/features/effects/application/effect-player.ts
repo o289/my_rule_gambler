@@ -1,5 +1,5 @@
 import { beatsFor, effectDuration } from '../model/effect-model';
-import type { Beat, Cue, EffectRequest } from '../model/effect-model';
+import type { Beat, Cue, EffectRequest, EffectTurnScenario } from '../model/effect-model';
 
 export interface EffectPlayback {
   readonly id: number;
@@ -46,7 +46,7 @@ export class EffectPlayer {
   private playback: EffectPlayback | null = null;
   private continuation: RollContinuation | null = null;
 
-  constructor(private audio: EffectAudio, private clock = browserClock) {}
+  constructor(private audio: EffectAudio, private turnScenario: EffectTurnScenario, private clock = browserClock) {}
 
   getSnapshot = () => this.playback;
 
@@ -98,7 +98,7 @@ export class EffectPlayer {
   play(request: EffectRequest, reduced: boolean) {
     this.stopPending();
     const id = ++this.sequence;
-    const beats = beatsFor(request, reduced);
+    const beats = beatsFor(request, reduced, this.turnScenario);
     const started = this.clock.now();
     this.publish({
       id, request, duration: effectDuration(beats), phase: 'start',
