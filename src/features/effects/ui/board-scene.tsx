@@ -2,7 +2,7 @@ import { memo, useLayoutEffect, useMemo, useRef } from 'react';
 import type { Ref, RefObject } from 'react';
 import { GamblerBoard } from '../../board/ui/GamblerBoard';
 import { cellKey, initialState } from '../../board/model/board-model';
-import type { BoardDefinition, CellAddress } from '../../board/model/board-model';
+import type { BoardAward, BoardDefinition, CellAddress } from '../../board/model/board-model';
 import { GEMS, GEM_IDS } from '../../board/model/gems';
 import type { GemId } from '../../board/model/gems';
 import { centerWithin } from './visuals';
@@ -19,12 +19,13 @@ interface BoardSceneProps {
   viewportRef?: Ref<HTMLElement>;
   target?: CellAddress;
   definition: BoardDefinition;
+  award?: BoardAward | null;
   turnCue?: { cells: readonly CellAddress[]; tone: 'aim' | 'available'; pulse: boolean };
   placed?: GemId;
   tone?: 'gold' | 'gem';
 }
 
-export const BoardScene = memo(function BoardScene({ viewportRef, target, definition, turnCue, placed, tone }: BoardSceneProps) {
+export const BoardScene = memo(function BoardScene({ viewportRef, target, definition, award, turnCue, placed, tone }: BoardSceneProps) {
   const board = useRef<HTMLElement>(null);
   const state = useMemo(() => {
     const base = initialState(definition);
@@ -34,8 +35,8 @@ export const BoardScene = memo(function BoardScene({ viewportRef, target, defini
       if (placed) occupied.set(key, placed);
       else occupied.delete(key);
     }
-    return { ...base, occupied, selection: target ?? null };
-  }, [definition, target, placed]);
+    return { ...base, occupied, selection: target ?? null, award: award ?? null };
+  }, [definition, target, placed, award]);
 
   useLayoutEffect(() => {
     const cell = locateCell(board.current, target);
