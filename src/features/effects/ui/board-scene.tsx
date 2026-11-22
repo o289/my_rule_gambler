@@ -123,9 +123,10 @@ export function ConvergingLights({ stage, board, target }: {
     const source = board.current;
     if (!shell || !source || !lights.current) return;
     const animations: Animation[] = [];
-    const startPoints = source.querySelectorAll('.gem-heading');
+    const starts = [...source.querySelectorAll<HTMLElement>('.board-cell[data-required-gem]')];
     for (const [index, light] of Array.from(lights.current.children).entries()) {
-      const origin = startPoints.item(index);
+      const gem = light.getAttribute('data-gem');
+      const origin = starts.find(cell => cell.dataset.requiredGem === gem) ?? starts[index % starts.length];
       if (!origin) continue;
       const point = centerWithin(origin, shell);
       const endX = target?.x ?? shell.clientWidth * .5;

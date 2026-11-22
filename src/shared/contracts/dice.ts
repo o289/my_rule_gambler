@@ -51,6 +51,7 @@ export interface GameState {
   phase: 'ready' | 'rolling' | 'confirm' | 'placement';
   revision: number;
   config: RollConfig;
+  boardSeed?: number;
   placements: readonly Placement[];
   results: readonly DiceResult[];
   remaining: readonly string[];
@@ -74,7 +75,7 @@ export type ClientMessage =
   | { type: 'roll' | 'reroll'; requestId: string }
   | { type: 'confirm'; rollId: string }
   | { type: 'config'; config: RollConfig }
-  | { type: 'place'; rollId: string; dieId: string; row: number }
+  | { type: 'place'; rollId: string; dieId: string; row: number; column?: number }
   | { type: 'end-turn'; revision: number };
 
 export type ServerMessage =
@@ -124,7 +125,8 @@ export function readClientMessage(value: unknown): ClientMessage | null {
       return config(value.config) ? { type: 'config', config: value.config } : null;
     case 'place':
       return id(value.rollId) && id(value.dieId) && int(value.row, 0, BOARD_ROWS - 1)
-        ? { type: 'place', rollId: value.rollId, dieId: value.dieId, row: value.row } : null;
+        && (value.column === undefined || int(value.column, 0, GEM_ORDER.length - 1))
+        ? { type: 'place', rollId: value.rollId, dieId: value.dieId, row: value.row, column: value.column } : null;
     case 'end-turn':
       return int(value.revision) ? { type: 'end-turn', revision: value.revision } : null;
     default:
@@ -175,6 +177,7 @@ function gameState(value: unknown): value is GameState {
   return record(value) && listOf(value.seats, seat, 6) && (value.turnId === null || id(value.turnId))
     && ['ready', 'rolling', 'confirm', 'placement'].some(phase => phase === value.phase)
     && int(value.revision) && config(value.config)
+    && (value.boardSeed === undefined || int(value.boardSeed, 0, 0xffff_ffff))
     && listOf(value.placements, placement, BOARD_ROWS * GEM_ORDER.length)
     && listOf(value.results, diceResult, 5) && listOf(value.remaining, id, 5)
     && typeof value.placedThisRoll === 'boolean' && typeof value.hasLegalPlacement === 'boolean';

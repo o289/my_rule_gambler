@@ -802,7 +802,6 @@ body {
     --board-pad: 12px;
     --rim-width: 29px;
     --tile-gap: 3px;
-    --score-min: 35px;
     --cell-min: 35px;
   }
   .shared-die { --die-size: clamp(125px, 43cqi, 186px); }
@@ -850,7 +849,6 @@ body {
   --board-pad: 13px;
   --rim-width: 33px;
   --cell-min: 32px;
-  --score-min: 36px;
 }
 
 .turn-scene[data-ranking="true"] { visibility: hidden; }
@@ -1048,7 +1046,6 @@ body {
     --board-pad: 8px;
     --rim-width: 25px;
     --cell-min: 29px;
-    --score-min: 34px;
     --tile-gap: 2px;
   }
 }

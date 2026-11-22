@@ -43,7 +43,3 @@ export function upperFace([x, y, z, w]: Quaternion) {
 export function releaseAt(kind: 'initial' | 'reroll') {
   return kind === 'initial' ? 810 : 1490;
 }
-
-export function boardCellKey(row: number, column: number) {
-  return row * GEM_ORDER.length + column;
-}

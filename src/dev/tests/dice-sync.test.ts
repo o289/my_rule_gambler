@@ -3,6 +3,8 @@ import { once } from 'node:events';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { WebSocket } from 'ws';
+import { createGoalBoard } from '../../features/board/model/goal-layout';
+import { nextOpenCell, requiredGemAt } from '../../features/board/model/board-model';
 import { startDiceServer } from '../../platform/local-demo-servers/dice/server/http';
 import { parseJson, readServerMessage } from '../../shared/contracts/dice';
 import type { ClientMessage, ServerMessage } from '../../shared/contracts/dice';
@@ -56,6 +58,10 @@ test('server shares one simulation, resumes it, and authorizes CONFIRM and rerol
     assert.equal(first.state.turnId, first.playerId);
     assert.notEqual(first.token, second.token);
     assert.equal(first.state.config.hz, 120);
+    const seed = first.state.boardSeed;
+    assert.ok(seed !== undefined);
+    assert.equal(second.state.boardSeed, seed);
+    const definition = createGoalBoard(seed);
 
     other.send({ type: 'roll', requestId: 'non-owner' });
     await other.wait('error', event => event.code === 'TURN');
@@ -76,6 +82,7 @@ test('server shares one simulation, resumes it, and authorizes CONFIRM and rerol
     const resumed = new Client(server.port);
     const welcome = await resumed.join(second.token);
     assert.equal(welcome.playerId, second.playerId);
+    assert.equal(welcome.state.boardSeed, seed);
     assert.ok(welcome.view);
     assert.equal(welcome.roll?.id, rollId);
     assert.ok((welcome.roll?.latest.seq ?? -1) >= leavingAt.frame.seq);
@@ -116,17 +123,26 @@ test('server shares one simulation, resumes it, and authorizes CONFIRM and rerol
     const observerAgain = new Client(server.port);
     const progressed = await observerAgain.join(observer.token, false);
     assert.equal(progressed.state.revision, shared.state.revision);
+    assert.equal(progressed.state.boardSeed, seed);
     assert.deepEqual(progressed.state.results, shared.state.results);
     assert.equal(progressed.view, false);
 
-    let remaining = shared.state.remaining;
-    const ruby = shared.state.results.find(result => result.gem === 'ruby');
-    if (ruby) {
-      owner.send({ type: 'place', rollId, dieId: ruby.id, row: 0 });
-      const placed = await resumed.wait('state', event => event.state.placedThisRoll);
-      assert.equal(placed.state.placements.length, 1);
-      remaining = placed.state.remaining;
-    }
+    const available = definition.rows.flatMap((row, rowIndex) => {
+      const cell = nextOpenCell(definition, new Set<string>(), row.id);
+      if (!cell) return [];
+      const die = shared.state.results.find(item => item.gem === requiredGemAt(definition, cell));
+      return die ? [{ die, rowIndex }] : [];
+    });
+    const legal = available[0];
+    assert.ok(legal, 'every kind of gem opens at least one row');
+
+    owner.send({ type: 'place', rollId, dieId: legal.die.id, row: legal.rowIndex, column: 1 });
+    await owner.wait('error', event => event.code === 'CELL');
+    owner.send({ type: 'place', rollId, dieId: legal.die.id, row: legal.rowIndex, column: 0 });
+    const placed = await resumed.wait('state', event => event.state.placedThisRoll);
+    assert.deepEqual(placed.state.placements, [{ row: legal.rowIndex, column: 0, gem: legal.die.gem }]);
+    assert.equal(placed.state.boardSeed, seed);
+    const remaining = placed.state.remaining;
     owner.send({ type: 'config', config: { count: 1, hz: 120 } });
     const configured = await resumed.wait('state', event => event.state.phase === 'placement' && event.state.config.count === 1);
     assert.equal(configured.roll?.config.hz, 240);

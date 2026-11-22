@@ -1,5 +1,5 @@
 import { SAMPLE_BOARD } from './sample-board';
-import { canSelect, cellKey, initialState } from '../../features/board/model/board-model';
+import { initialState, nextOpenCell, requiredGemAt } from '../../features/board/model/board-model';
 import type { BoardDefinition, CellAddress } from '../../features/board/model/board-model';
 import type { GemId } from '../../features/board/model/gems';
 import type { EffectParams, EffectScenario } from '../../features/effects/model/effect-model';
@@ -11,7 +11,7 @@ const targetScore = 100;
 export const COMEBACK_BOARD: BoardDefinition = {
   ...SAMPLE_BOARD,
   rows: SAMPLE_BOARD.rows.map(row => row.id === LAST_CELL.rowId
-    ? { ...row, score: targetScore, cells: { ...row.cells, topaz: { blocked: true }, diamond: { blocked: true } } }
+    ? { ...row, score: targetScore, goalColumnId: LAST_CELL.columnId }
     : row),
 };
 
@@ -37,11 +37,8 @@ const rerollInitialBoard = initialState(SAMPLE_BOARD);
 export function rerollTargets(gem: GemId): readonly CellAddress[] {
   const targets: CellAddress[] = [];
   for (const row of SAMPLE_BOARD.rows) {
-    const column = SAMPLE_BOARD.columns.find(entry => {
-      const cell = { rowId: row.id, columnId: entry.id };
-      return canSelect(SAMPLE_BOARD, cell) && !rerollInitialBoard.occupied.has(cellKey(cell));
-    });
-    if (column?.gem === gem) targets.push({ rowId: row.id, columnId: column.id });
+    const open = nextOpenCell(SAMPLE_BOARD, rerollInitialBoard.occupied, row.id);
+    if (open && requiredGemAt(SAMPLE_BOARD, open) === gem) targets.push(open);
   }
   return targets;
 }

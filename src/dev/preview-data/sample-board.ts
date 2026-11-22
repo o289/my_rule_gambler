@@ -5,16 +5,16 @@ export const SAMPLE_BOARD: BoardDefinition = {
   columns: GEM_IDS.map(gem => ({ id: gem, gem })),
   rows: [
     {
-      id: 'royal', score: 100,
+      id: 'royal', score: 100, goalColumnId: 'diamond',
       cells: { ruby: { gem: 'ruby' }, sapphire: { gem: 'sapphire' }, emerald: { gem: 'emerald' } },
     },
     {
-      id: 'fifty', score: 50,
-      cells: { ruby: { gem: 'emerald' }, sapphire: { gem: 'sapphire' }, topaz: { gem: 'topaz' } },
+      id: 'fifty', score: 50, goalColumnId: 'topaz',
+      cells: { ruby: { gem: 'emerald', requiredGem: 'emerald' }, sapphire: { gem: 'sapphire' } },
     },
-    { id: 'thirty', score: 30, cells: { ruby: { gem: 'ruby' }, diamond: { blocked: false } } },
-    { id: 'twenty', score: 20, cells: { diamond: { gem: 'diamond' } } },
-    { id: 'ten', score: 10, cells: { amethyst: { gem: 'amethyst' } } },
-    { id: 'penalty', score: -10, cells: { diamond: { blocked: false } } },
+    { id: 'thirty', score: 30, goalColumnId: 'amethyst', cells: { ruby: { gem: 'ruby' }, emerald: { requiredGem: 'sapphire' } } },
+    { id: 'twenty', score: 20, goalColumnId: 'emerald' },
+    { id: 'ten', score: 10, goalColumnId: 'sapphire', cells: { sapphire: { requiredGem: 'ruby' } } },
+    { id: 'penalty', score: -10, goalColumnId: 'ruby' },
   ],
 };

@@ -10,6 +10,7 @@ import type { EffectKind } from '../model/effect-model';
 import { EffectScene, EFFECT_ICONS, outcome } from './effects';
 import { REDUCED_SCORE_MS, scoreTimings } from './board-score/board-motion';
 import './board-score/score-effect.css';
+import { playableColumns } from '../../board/model/board-model';
 import type { BoardAward } from '../../board/model/board-model';
 
 const keys: EffectKind[] = ['DICE_STOP', 'GEM_PLACEMENT', 'BIG_WIN', 'COMEBACK', 'JACKPOT_VICTORY', 'ONE_CELL_COMEBACK', 'REROLL_THROW'];
@@ -26,6 +27,7 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
   const [scoreReduced, setScoreReduced] = useState(false);
   const scoreSequence = useRef(0);
   const scoreRow = scenario.board.rows[0];
+  const scoreLength = scoreRow ? playableColumns(scenario.board, scoreRow).length : 0;
   const reducedMotion = useSyncExternalStore(
     listener => {
       const media = matchMedia('(prefers-reduced-motion: reduce)');
@@ -43,13 +45,13 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
 
   useEffect(() => {
     if (!scoreAward) return;
-    const duration = scoreReduced ? REDUCED_SCORE_MS : scoreTimings(scenario.board.columns.length).total;
+    const duration = scoreReduced ? REDUCED_SCORE_MS : scoreTimings(scoreLength).total;
     const timer = window.setTimeout(() => {
       setScoreResult(scoreAward);
       setScoreAward(null);
     }, duration);
     return () => window.clearTimeout(timer);
-  }, [scoreAward, scoreReduced, scenario.board.columns.length]);
+  }, [scoreAward, scoreReduced, scoreLength]);
 
   function playScoreEffect() {
     if (!scoreRow || scoreAward) return;

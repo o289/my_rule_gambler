@@ -1,7 +1,7 @@
 import { StrictMode, useReducer, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { GamblerBoard } from './GamblerBoard';
-import { cellKey, formatScore, initialState, updateBoard } from '../model/board-model';
+import { canPlaceGem, cellKey, formatScore, initialState, nextOpenCell, requiredGemAt, updateBoard } from '../model/board-model';
 import type { BoardAction, BoardDefinition } from '../model/board-model';
 import { GEMS, GEM_IDS } from '../model/gems';
 import './style.css';
@@ -37,11 +37,15 @@ function ScoreEditor({ score, onSubmit }: { score: number; onSubmit: (score: num
   );
 }
 
-function App({ board }: { board: BoardDefinition }) {
+interface BoardScreenProps { board: BoardDefinition; onNewBoard?: () => void }
+
+function App({ board, onNewBoard }: BoardScreenProps) {
   const [state, dispatch] = useReducer((current: ReturnType<typeof initialState>, action: BoardAction) => updateBoard(board, current, action), board, initialState);
   const boardArea = useRef<HTMLElement>(null);
   const selection = state.selection;
-  const column = board.columns.find(column => column.id === selection?.columnId);
+  const expected = selection ? requiredGemAt(board, selection) : undefined;
+  const canPlace = selection ? canPlaceGem(board, state.occupied, selection, state.gem) : false;
+  const isNext = selection && nextOpenCell(board, state.occupied, selection.rowId)?.columnId === selection.columnId;
   const rowScore = selection ? state.scores.get(selection.rowId) : undefined;
   const selectedGem = selection ? state.occupied.get(cellKey(selection)) : undefined;
 
@@ -78,19 +82,22 @@ function App({ board }: { board: BoardDefinition }) {
       </header>
       <div className="page-title">
         <h1>ギャンブラーボード</h1>
-        <p>マスを選び、行の得点を編集して宝石を配置できます。</p>
+        <p>指定の宝石を左から順に配置します。得点はゴールの下に表示されます。</p>
       </div>
       <div className="table-layout">
         <GamblerBoard board={board} state={state} viewportRef={boardArea} onSelect={cell => dispatch({ type: 'select-cell', cell })} />
         <aside className="controls" aria-labelledby="controls-title">
           <div className="controls-heading">
             <h2 id="controls-title">ボード操作</h2>
-            <button className="text-button" type="button" onClick={reset}>リセット</button>
+            <div className="board-reset-buttons">
+              <button className="text-button" type="button" onClick={reset}>リセット</button>
+              {onNewBoard && <button className="text-button" type="button" onClick={onNewBoard}>新しい盤面</button>}
+            </div>
           </div>
           <div className="selection-card" aria-live="polite" aria-atomic="true">
             <span className="small-label">選択中のマス</span>
-            <strong>{rowScore !== undefined && column ? `${formatScore(rowScore)}点の行 · ${GEMS[column.gem].name}列` : 'マスを選択してください'}</strong>
-            {selection && <span className="selection-state">{selectedGem ? `${GEMS[selectedGem].name}を配置済み` : '配置可能'}</span>}
+            <strong>{rowScore !== undefined && expected ? `${formatScore(rowScore)}点の行 · ${GEMS[expected].name}` : 'マスを選択してください'}</strong>
+            {selection && <span className="selection-state">{selectedGem ? `${GEMS[selectedGem].name}を配置済み` : !isNext ? '左側の空きマスが先です' : canPlace ? '配置可能' : '指定の宝石を選択してください'}</span>}
           </div>
           <fieldset className="gem-field">
             <legend>配置する宝石</legend>
@@ -107,7 +114,7 @@ function App({ board }: { board: BoardDefinition }) {
             </div>
           </fieldset>
           <div className="cell-actions">
-            <button type="button" className="primary-button" onClick={place} disabled={!selection || Boolean(selectedGem)}>宝石を配置</button>
+            <button type="button" className="primary-button" onClick={place} disabled={!canPlace}>宝石を配置</button>
             <button type="button" className="quiet-button" onClick={() => dispatch({ type: 'remove' })} disabled={!selectedGem}>取り除く</button>
           </div>
           <section className="score-controls" aria-label="行の得点設定">
@@ -121,6 +128,6 @@ function App({ board }: { board: BoardDefinition }) {
   );
 }
 
-export default function BoardPreview({ board }: { board: BoardDefinition }) {
-  return <StrictMode><App board={board} /></StrictMode>;
+export default function BoardScreen(props: BoardScreenProps) {
+  return <StrictMode><App {...props} /></StrictMode>;
 }

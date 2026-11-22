@@ -25,11 +25,12 @@ export interface DiceBoardContext {
   canAct: boolean;
   inPlacement: boolean;
   board: BoardState;
+  definition: BoardDefinition;
 }
 
 export interface DiceBoardAdapter {
-  definition: BoardDefinition;
-  createState: (game: GameState | null, active: DiceResult | undefined) => BoardState;
+  getDefinition: (seed: number | undefined) => BoardDefinition;
+  createState: (definition: BoardDefinition, game: GameState | null, active: DiceResult | undefined) => BoardState;
   onSelect: (cell: CellAddress, context: DiceBoardContext) => void;
 }
 
@@ -141,7 +142,10 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
     const remaining = game?.results.filter(result => game.remaining.includes(result.id));
     return remaining?.find(result => result.id === selectedId) ?? remaining?.[0];
   }, [game, selectedId]);
-  const board = useMemo(() => boardAdapter.createState(game, own && inPlacement ? selected : undefined), [boardAdapter, game, own, inPlacement, selected]);
+  const seed = game?.boardSeed;
+  const definition = useMemo(() => boardAdapter.getDefinition(seed), [boardAdapter, seed]);
+  const board = useMemo(() => boardAdapter.createState(definition, game, own && inPlacement ? selected : undefined),
+    [boardAdapter, definition, game, own, inPlacement, selected]);
 
   useEffect(() => {
     let previousTray: string | null = null;
@@ -184,8 +188,8 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
     <div className="salon-title"><h1>宝石サイコロ 3D</h1><span role="status">{seat?.name ?? (info.status === 'offline' ? '再接続中' : '接続中')} {seat && (own ? '・あなたの手番' : current ? `・${current.name} の手番` : '')}</span></div>
     <div className="table-layout">
       <div className="game-board">
-        <GamblerBoard board={boardAdapter.definition} state={board} viewportRef={null}
-          onSelect={cell => boardAdapter.onSelect(cell, { game, roll, selected, canAct, inPlacement, board })} />
+        <GamblerBoard board={definition} state={board} viewportRef={null}
+          onSelect={cell => boardAdapter.onSelect(cell, { game, roll, selected, canAct, inPlacement, board, definition })} />
       </div>
       <aside className="turn-card" aria-labelledby="turn-title">
         <div className="turn-heading"><h2 id="turn-title">ダイス操作</h2><span>{game?.seats.filter(item => item.online).length ?? 0}人 接続</span></div>

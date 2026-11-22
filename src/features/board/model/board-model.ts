@@ -1,13 +1,15 @@
-import type { GemId } from "./gems";
+import type { GemId } from "./gem-ids";
 
 export interface BoardCellSetup {
   gem?: GemId;
+  requiredGem?: GemId;
   blocked?: boolean;
 }
 
 export interface BoardRow {
   id: string;
   score: number;
+  goalColumnId?: string;
   cells?: Readonly<Record<string, BoardCellSetup>>;
 }
 
@@ -63,13 +65,40 @@ export function formatScore(score: number) {
   return score > 0 ? `+${score}` : "0";
 }
 
+export function playableColumns(board: BoardDefinition, row: BoardRow) {
+  const end = row.goalColumnId === undefined
+    ? board.columns.length - 1
+    : board.columns.findIndex(column => column.id === row.goalColumnId);
+  return board.columns.slice(0, end + 1).filter(column => !row.cells?.[column.id]?.blocked);
+}
+
+export function goalColumn(board: BoardDefinition, row: BoardRow) {
+  return playableColumns(board, row).at(-1);
+}
+
 export function canSelect(board: BoardDefinition, cell: CellAddress) {
-  const row = board.rows.find((row) => row.id === cell.rowId);
-  return Boolean(
-    row &&
-    board.columns.some((column) => column.id === cell.columnId) &&
-    !row.cells?.[cell.columnId]?.blocked,
-  );
+  const row = board.rows.find(row => row.id === cell.rowId);
+  return Boolean(row && playableColumns(board, row).some(column => column.id === cell.columnId));
+}
+
+export function requiredGemAt(board: BoardDefinition, cell: CellAddress) {
+  const row = board.rows.find(row => row.id === cell.rowId);
+  const column = row && playableColumns(board, row).find(column => column.id === cell.columnId);
+  return column && (row?.cells?.[cell.columnId]?.requiredGem ?? column.gem);
+}
+
+export function nextOpenCell(board: BoardDefinition, occupied: Pick<ReadonlySet<string>, 'has'>, rowId: string) {
+  const row = board.rows.find(row => row.id === rowId);
+  if (!row) return undefined;
+  for (const column of playableColumns(board, row)) {
+    const cell = { rowId, columnId: column.id };
+    if (!occupied.has(cellKey(cell))) return cell;
+  }
+  return undefined;
+}
+
+export function canPlaceGem(board: BoardDefinition, occupied: Pick<ReadonlySet<string>, 'has'>, cell: CellAddress, gem: GemId) {
+  return nextOpenCell(board, occupied, cell.rowId)?.columnId === cell.columnId && requiredGemAt(board, cell) === gem;
 }
 
 export function initialState(
@@ -83,19 +112,16 @@ export function initialState(
   let firstSelectable: CellAddress | null = null;
   for (const row of board.rows) {
     scores.set(row.id, row.score);
-    for (const column of board.columns) {
+    for (const column of playableColumns(board, row)) {
       const cell = { rowId: row.id, columnId: column.id };
       const setup = row.cells?.[column.id];
       if (setup?.gem) occupied.set(cellKey(cell), setup.gem);
-      if (setup?.blocked) continue;
       firstSelectable ??= cell;
       if (!setup?.gem) selection ??= cell;
     }
   }
   selection ??= firstSelectable;
-  const gem =
-    board.columns.find((column) => column.id === selection?.columnId)?.gem ??
-    "ruby";
+  const gem = (selection && requiredGemAt(board, selection)) || 'ruby';
   return {
     occupied,
     scores,
@@ -122,9 +148,8 @@ export function updateBoard(
     case "select-gem":
       return { ...state, gem: action.gem };
     case "place": {
-      if (!state.selection || !canSelect(board, state.selection)) return state;
+      if (!state.selection || !canPlaceGem(board, state.occupied, state.selection, state.gem)) return state;
       const cell = cellKey(state.selection);
-      if (state.occupied.has(cell)) return state;
       const occupied = new Map(state.occupied).set(cell, state.gem);
       const placement = { cell, id: state.nextId };
       return { ...state, occupied, placement, nextId: state.nextId + 1 };

@@ -1,5 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { BOARD_ROWS, GEM_ORDER, boardCellKey } from '../../../../features/dice/model/geometry';
+import { cellKey, nextOpenCell, requiredGemAt } from '../../../../features/board/model/board-model';
+import { createGoalBoard } from '../../../../features/board/model/goal-layout';
 import { DEFAULT_CONFIG } from '../../../../shared/contracts/dice';
 import type { ClientMessage, Frame, GameState, Placement, RollConfig, RollKind, RollView, ServerMessage } from '../../../../shared/contracts/dice';
 import { PhysicsRoll } from '../../../../features/dice/server/physics';
@@ -36,28 +37,26 @@ export class DiceRoom {
   private results: GameState['results'] = [];
   private remaining: string[] = [];
   private placedThisRoll = false;
-  private board = new Map<number, Placement>();
+  private readonly boardSeed = randomBytes(4).readUInt32LE();
+  private readonly definition = createGoalBoard(this.boardSeed);
+  private readonly board = new Map<string, Placement>();
   private lastOccupiedAt = Date.now();
 
   constructor(private readonly allowDev: boolean) {}
 
-  private openColumn(row: number) {
-    return GEM_ORDER.findIndex((_, column) => !this.board.has(boardCellKey(row, column)));
-  }
-
   private hasLegalPlacement() {
     const remaining = this.results.filter(die => this.remaining.includes(die.id));
-    for (let row = 0; row < BOARD_ROWS; row += 1) {
-      if (remaining.some(die => die.gem === GEM_ORDER[this.openColumn(row)])) return true;
-    }
-    return false;
+    return this.definition.rows.some(row => {
+      const open = nextOpenCell(this.definition, this.board, row.id);
+      return open && remaining.some(die => die.gem === requiredGemAt(this.definition, open));
+    });
   }
 
   private state(): GameState {
     return {
       seats: this.members.map(member => ({ id: member.id, name: member.name, online: member.peer !== null })),
       turnId: this.turnId, phase: this.phase, revision: this.revision, config: this.config,
-      placements: [...this.board.values()], results: this.results, remaining: this.remaining,
+      boardSeed: this.boardSeed, placements: [...this.board.values()], results: this.results, remaining: this.remaining,
       placedThisRoll: this.placedThisRoll, hasLegalPlacement: this.hasLegalPlacement(),
     };
   }
@@ -226,12 +225,15 @@ export class DiceRoom {
         if (this.phase !== 'placement' || this.roll?.id !== message.rollId || !this.remaining.includes(message.dieId)) return;
         const die = this.results.find(item => item.id === message.dieId);
         if (!die) return;
-        const column = this.openColumn(message.row);
-        if (GEM_ORDER[column] !== die.gem) {
-          this.error(peer, 'CELL', '行の左端の空きマスに、同じ宝石のダイスを置けます。');
+        const row = this.definition.rows[message.row];
+        const open = row && nextOpenCell(this.definition, this.board, row.id);
+        const column = this.definition.columns.findIndex(item => item.id === open?.columnId);
+        if (!open || requiredGemAt(this.definition, open) !== die.gem
+          || (message.column !== undefined && column !== message.column)) {
+          this.error(peer, 'CELL', '行の左端の空きマスに、指定と同じ宝石のダイスを置けます。');
           return;
         }
-        this.board.set(boardCellKey(message.row, column), { row: message.row, column, gem: die.gem });
+        this.board.set(cellKey(open), { row: message.row, column, gem: die.gem });
         this.remaining = this.remaining.filter(id => id !== die.id);
         this.placedThisRoll = true;
         this.revision += 1;
