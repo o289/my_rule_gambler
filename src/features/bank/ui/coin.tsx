@@ -1,20 +1,27 @@
 import type { CSSProperties, Ref } from 'react';
-import type { Coin } from '../model/bank-model';
+import type { Coin, CoinValue } from '../model/bank-model';
+import goldHundred from '../../../shared/assets/bank/coin-100.webp';
 import goldFifty from '../../../shared/assets/bank/coin-50.webp';
 import goldTen from '../../../shared/assets/bank/coin-10.webp';
 import coinBack from '../../../shared/assets/bank/coin-back.webp';
+
+const FACES = {
+  10: { image: goldTen, alloy: 'champagne' },
+  50: { image: goldFifty, alloy: 'amber' },
+  100: { image: goldHundred, alloy: 'royal' },
+} satisfies Record<CoinValue, { image: string; alloy: string }>;
 
 const RIM_SEGMENTS = Array.from({ length: 32 }, (_, index) => index * (360 / 32));
 type EdgeStyle = CSSProperties & { '--segment-angle': string };
 
 export function GoldCoin({ coin, rotor }: { coin: Coin; rotor?: Ref<HTMLSpanElement> }) {
-  const appearance = coin.value >= 50 ? 'amber' : 'champagne';
+  const { image, alloy } = FACES[coin.value];
 
   return (
-    <span className="coin-shell" data-alloy={appearance} aria-hidden="true">
+    <span className="coin-shell" data-alloy={alloy} aria-hidden="true">
       <span className="coin-solid" ref={rotor}>
         <span className="coin-face coin-front">
-          <img src={appearance === 'amber' ? goldFifty : goldTen} alt="" draggable={false} />
+          <img src={image} alt="" draggable={false} />
           <span className="coin-denomination">{coin.value}</span>
           <i className="coin-sheen" />
         </span>

@@ -1,7 +1,8 @@
+import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
 import { StrictMode, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { CSSProperties } from 'react';
+import type { CSSProperties, FormEvent } from 'react';
 import { audio, bank, bankActions as api } from '../application/bank-api';
-import { DEMO_RESERVE, DEMO_TRANSACTIONS, DEMO_WALLET, selectPayment, VAULT_DOOR_MS } from '../model/bank-model';
+import { BANK_AMOUNT_STEP, bankBalance, DEFAULT_BANK_AMOUNT, DEMO_PLAYER, DEMO_RESERVE, DEMO_WALLET, selectPayment, VAULT_DOOR_MS } from '../model/bank-model';
 import type { BankCue, BankDirection, Coin } from '../model/bank-model';
 import { CoinFlights } from './coin-flight';
 import { PlayerTray } from './tray';
@@ -48,20 +49,27 @@ function summarize(coins: readonly Coin[]) {
 }
 
 function App() {
+  useAudioActivation(audio.unlock);
   const snapshot = useSyncExternalStore(bank.subscribe, bank.getSnapshot);
   const { run, mode } = snapshot;
   const selected = MODES[mode];
-  const transaction = DEMO_TRANSACTIONS[mode];
+  const [amount, setAmount] = useState(String(DEFAULT_BANK_AMOUNT));
+  const activeAmount = run?.playing ? String(run.transaction.amount) : amount;
+  const points = Number(activeAmount);
+  const startingCoins = mode === 'withdraw' ? DEMO_WALLET : DEMO_RESERVE;
+  const source = run ? startingCoins : mode === 'withdraw' ? snapshot.wallet : snapshot.reserve;
+  const limit = bankBalance(source);
+  const completedAmount = run && !run.playing ? run.transaction.amount : null;
   const stage = useRef<HTMLDivElement>(null);
-  const [soundOn, setSoundOn] = useState(false);
-  const [audioPending, setAudioPending] = useState(false);
-  const [volume, setVolume] = useState(64);
-  const [error, setError] = useState('');
-  const defaultCoins = useMemo(
-    () => selectPayment(mode === 'withdraw' ? DEMO_WALLET : DEMO_RESERVE, transaction.amount),
-    [mode, transaction.amount],
-  );
-  const plannedCoins = run?.payment ?? defaultCoins;
+  const { plannedCoins, amountError } = useMemo(() => {
+    try {
+      return { plannedCoins: selectPayment(source, points), amountError: '' };
+    } catch (exception) {
+      return { plannedCoins: [], amountError: exception instanceof RangeError ? exception.message : '取引額を確認してください。' };
+    }
+  }, [source, points]);
+  const plan = run?.playing ? run.payment : plannedCoins;
+  const canPay = !run?.playing && !amountError && completedAmount !== points;
   const style: CSSProperties & { '--door-ms': string; '--run-ms': string } = {
     '--door-ms': `${VAULT_DOOR_MS}ms`, '--run-ms': `${run?.duration ?? 0}ms`,
   };
@@ -73,29 +81,19 @@ function App() {
     if (bounds.top < 5 || bounds.bottom > innerHeight - 5) scene.scrollIntoView({ block: 'start' });
   }
 
-  async function toggleAudio() {
-    if (audioPending) return;
-    setAudioPending(true);
-    setError('');
-    try {
-      const status = await audio.enable(!soundOn);
-      setSoundOn(status);
-      if (!status && !soundOn) setError('このブラウザで効果音を有効にできませんでした。');
-    } catch {
-      setError('このブラウザで効果音を有効にできませんでした。');
-    } finally {
-      setAudioPending(false);
-    }
+  function pay(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const current = bank.getSnapshot();
+    if (!canPay || current.mode !== mode || current.run?.playing || current.run?.transaction.amount === points) return;
+    if (current.run) api.reset();
+    if (api.playBankTransaction({ type: mode, playerId: DEMO_PLAYER.id, amount: points })) showStage();
   }
 
-  function updateVolume(next: number) {
-    setVolume(next);
-    audio.setVolume(next / 100);
-  }
-
-  function pay() {
+  function replay() {
+    if (!run) return;
+    setAmount(String(run.transaction.amount));
     showStage();
-    api.playBankTransaction(transaction);
+    api.replay();
   }
 
   return (
@@ -118,7 +116,7 @@ function App() {
           <div className="bank-stage" ref={stage} data-cue={run?.cue ?? 'idle'} data-direction={mode} data-playing={Boolean(run?.playing)}>
             <div className="bank-matte" aria-hidden="true"><i /><i /><i /><i /></div>
             <Vault key={`vault-${run?.id ?? 'idle'}`} run={run} />
-            <PlayerTray key={`tray-${run?.id ?? 'idle'}`} snapshot={snapshot} initialWallet={DEMO_WALLET} incoming={mode === 'deposit' ? plannedCoins : []} />
+            <PlayerTray key={`tray-${run?.id ?? 'idle'}`} snapshot={snapshot} />
             {run && !run.reduced && <CoinFlights stage={stage} flights={run.flights} direction={run.transaction.type} />}
           </div>
           <div className="bank-footer">
@@ -142,23 +140,29 @@ function App() {
               </label>
             ))}
           </fieldset>
-          <div className="payment-summary" data-direction={mode}>
-            <div><strong>{run?.transaction.amount ?? transaction.amount}</strong><span>点</span></div>
-            <span>{summarize(plannedCoins)}</span>
-          </div>
-          <button type="button" id="pay-button" className="pay-button" disabled={Boolean(run)} onClick={pay}>{transaction.amount}{selected.action}</button>
-          <div className="reset-actions">
-            <button type="button" className="quiet-button" id="replay-payment" disabled={!run} onClick={() => { showStage(); api.replay(); }}>もう一度再生</button>
-            <button type="button" className="quiet-button" id="reset-payment" onClick={api.reset}>リセット</button>
-          </div>
-          <div className="audio-controls">
-            <div className="audio-heading">
-              <h2>効果音</h2>
-              <button type="button" aria-pressed={soundOn} aria-label="効果音" className="quiet-button" id="sound-toggle" disabled={audioPending} onClick={toggleAudio}>{soundOn ? 'ON' : 'OFF'}</button>
+          <form className="bank-amount-form" onSubmit={pay} noValidate>
+            <div className="bank-amount-row">
+              <label htmlFor="bank-amount">取引額</label>
+              <div className="bank-amount-field">
+                <input id="bank-amount" type="number" inputMode="numeric" min={BANK_AMOUNT_STEP} max={limit} step={BANK_AMOUNT_STEP}
+                  value={activeAmount} disabled={Boolean(run?.playing)} aria-invalid={Boolean(amountError)}
+                  aria-describedby="bank-amount-note" onChange={event => setAmount(event.currentTarget.value)} />
+                <span aria-hidden="true">点</span>
+              </div>
             </div>
-            <label className="volume-label" htmlFor="sound-volume">音量 <span>{volume}%</span></label>
-            <input type="range" id="sound-volume" min="0" max="100" value={volume} onChange={event => updateVolume(event.currentTarget.valueAsNumber)} />
-            {error && <p className="audio-error" role="alert">{error}</p>}
+            <p className="bank-amount-note" id="bank-amount-note" data-invalid={Boolean(amountError)} aria-live="polite">
+              {amountError || `${BANK_AMOUNT_STEP}点単位 · ${mode === 'withdraw' ? '所持' : '金庫'} ${limit}点まで`}
+            </p>
+            <div className="payment-summary" data-direction={mode}>
+              <span className="payment-summary-label">コインの内訳</span>
+              <span aria-live="polite">{plan.length ? summarize(plan) : '—'}</span>
+            </div>
+            <button type="submit" id="pay-button" className="pay-button" disabled={!canPay}>{amountError ? selected.label : `${points}${selected.action}`}</button>
+            {canPay && completedAmount !== null && <p className="bank-amount-note">次の取引は初期残高から開始します。</p>}
+          </form>
+          <div className="reset-actions">
+            <button type="button" className="quiet-button" id="replay-payment" disabled={!run} onClick={replay}>もう一度再生</button>
+            <button type="button" className="quiet-button" id="reset-payment" onClick={api.reset}>リセット</button>
           </div>
         </aside>
       </div>

@@ -1,4 +1,5 @@
-import { StrictMode, useRef, useState, useSyncExternalStore } from 'react';
+import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
+import { StrictMode, useRef, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import '../../board/ui/style.css';
 import './style.css';
@@ -16,12 +17,9 @@ declare global {
 window.gamblerEffects = Object.freeze(api);
 
 function App() {
+  useAudioActivation(sound.unlock);
   const playback = useSyncExternalStore(player.subscribe, player.getSnapshot);
   const stage = useRef<HTMLDivElement>(null);
-  const [audioOn, setAudioOn] = useState(false);
-  const [audioPending, setAudioPending] = useState(false);
-  const [volume, setVolume] = useState(62);
-  const [audioError, setAudioError] = useState('');
   const current = playback?.request.kind;
   const status = playback ? (playback.playing ? '再生中' : '演出完了') : '準備完了';
   const subtitle = playback && !playback.playing ? outcome(playback.request) : (current ? EFFECT_LABELS[current] : '演出を選んで再生');
@@ -32,26 +30,6 @@ function App() {
     if (!display || !matchMedia('(max-width: 880px)').matches) return;
     const rect = display.getBoundingClientRect();
     if (rect.top < 10 || rect.bottom > innerHeight - 10) display.scrollIntoView({ block: 'start' });
-  }
-
-  async function toggleAudio() {
-    if (audioPending) return;
-    setAudioPending(true);
-    setAudioError('');
-    try {
-      const active = await sound.enable(!audioOn);
-      setAudioOn(active);
-      if (!active && !audioOn) setAudioError('効果音を再生できませんでした。');
-    } catch {
-      setAudioError('効果音を再生できませんでした。');
-    } finally {
-      setAudioPending(false);
-    }
-  }
-
-  function changeVolume(newVolume: number) {
-    setVolume(newVolume);
-    sound.setVolume(newVolume / 100);
   }
 
   return (
@@ -104,15 +82,6 @@ function App() {
                 <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true"><path d="m4 2 5 4-5 4Z" fill="currentColor" /></svg>
               </button>
             ))}
-          </div>
-          <div className="sound-panel">
-            <div className="sound-header">
-              <h2>効果音</h2>
-              <button type="button" className="audio-toggle" aria-label="効果音" aria-pressed={audioOn} disabled={audioPending} onClick={toggleAudio}>{audioOn ? 'ON' : 'OFF'}</button>
-            </div>
-            <label className="volume-label" htmlFor="volume">音量 <output>{volume}%</output></label>
-            <input id="volume" type="range" min="0" max="100" step="1" value={volume} onChange={event => changeVolume(event.currentTarget.valueAsNumber)} />
-            {audioError && <p className="audio-error" role="alert">{audioError}</p>}
           </div>
         </aside>
       </div>

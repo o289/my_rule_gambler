@@ -1,3 +1,4 @@
+import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { GamblerBoard } from '../../board/ui/GamblerBoard';
@@ -134,14 +135,12 @@ function focusTarget() {
 }
 
 function App() {
+  useAudioActivation(audio.unlock);
   const info = useSyncExternalStore(connection.subscribe, connection.getSnapshot);
   const { game, roll } = info;
   const own = Boolean(game?.turnId && game.turnId === info.playerId);
   const inPlacement = game?.phase === 'placement';
   const canAct = own && info.status === 'online' && !info.pending;
-  const [sound, setSound] = useState(false);
-  const [soundBusy, setSoundBusy] = useState(false);
-  const [soundError, setSoundError] = useState('');
   const [monitor, setMonitor] = useState(false);
   const [fps, setFps] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<string>();
@@ -174,21 +173,6 @@ function App() {
   const resultCount = roll?.results.length ?? 0;
   useEffect(() => { if (info.tray && resultCount) audio.cue('result'); }, [info.tray, resultCount]);
 
-  async function toggleSound() {
-    if (soundBusy) return;
-    setSoundBusy(true);
-    setSoundError('');
-    try {
-      const active = await audio.enable(!sound);
-      setSound(active);
-      if (!active && !sound) setSoundError('効果音を有効にできませんでした。');
-    } catch {
-      setSoundError('効果音を有効にできませんでした。');
-    } finally {
-      setSoundBusy(false);
-    }
-  }
-
   function confirm(id: string) {
     if (connection.confirm(id)) audio.cue('confirm');
   }
@@ -210,12 +194,7 @@ function App() {
   return <main className="dice-salon">
     <header className="salon-header">
       <div className="salon-mark"><span aria-hidden="true">◇</span>ATELIER NOIR</div>
-      <div className="salon-utility">
-        <span className="room-chip" lang="en">{connection.room.toUpperCase()}</span>
-        <button type="button" className="quiet" aria-pressed={sound} aria-label="効果音" disabled={soundBusy} onClick={toggleSound}>
-          効果音 {sound ? 'ON' : 'OFF'}
-        </button>
-      </div>
+      <span className="room-chip" lang="en">{connection.room.toUpperCase()}</span>
     </header>
     <div className="salon-title"><h1>宝石サイコロ 3D</h1><span role="status">{seat?.name ?? (info.status === 'offline' ? '再接続中' : '接続中')} {seat && (own ? '・あなたの手番' : current ? `・${current.name} の手番` : '')}</span></div>
     <div className="table-layout">
@@ -242,7 +221,7 @@ function App() {
             : inPlacement ? '置けるダイスがなければ、手番を終了します。'
             : 'カップを傾けてダイスを振ります。'}
         </p>
-        {(info.problem || soundError) && <p className="notice" role="status">{info.problem || soundError}</p>}
+        {info.problem && <p className="notice" role="status">{info.problem}</p>}
         <div className="retained"><h3>確定した出目</h3>
           {game?.results.length
             ? <ResultStrip list={game.results} action={own && inPlacement ? setSelectedId : undefined}

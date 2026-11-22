@@ -1,44 +1,29 @@
+import { createAudioContext, CueAudio } from '../../../shared/audio/cue-audio';
 type Source = OscillatorNode | AudioBufferSourceNode;
 const QUIET = .0001;
-
-declare global {
-  interface Window { webkitAudioContext?: typeof AudioContext }
-}
 
 export class EntranceSound {
   private context: AudioContext | undefined;
   private master: GainNode | undefined;
   private noise: AudioBuffer | undefined;
   private voices = new Map<Source, readonly AudioNode[]>();
-  private enabled = false;
+  private readonly gate = new CueAudio(() => this.initialize());
+  readonly unlock = this.gate.unlock;
 
-  get isEnabled() { return this.enabled; }
-
-  async enable(next: boolean) {
-    if (!next) {
-      this.enabled = false;
-      this.cut();
-      return false;
-    }
-    if (navigator.userActivation?.isActive === false && this.context?.state !== 'running') return false;
-    if (!this.context) {
-      const Audio = window.AudioContext ?? window.webkitAudioContext;
-      if (!Audio) return false;
-      const context = new Audio();
-      const master = context.createGain();
-      const compressor = context.createDynamicsCompressor();
-      master.gain.value = .62;
-      master.connect(compressor).connect(context.destination);
-      const noise = context.createBuffer(1, Math.floor(context.sampleRate * .24), context.sampleRate);
-      const samples = noise.getChannelData(0);
-      for (let index = 0; index < samples.length; index += 1) samples[index] = Math.random() * 2 - 1;
-      this.context = context;
-      this.master = master;
-      this.noise = noise;
-    }
-    if (this.context.state !== 'running') await this.context.resume();
-    this.enabled = this.context.state === 'running';
-    return this.enabled;
+  private initialize() {
+    const context = createAudioContext();
+    if (!context) return null;
+    const master = context.createGain();
+    const compressor = context.createDynamicsCompressor();
+    master.gain.value = 1;
+    master.connect(compressor).connect(context.destination);
+    const noise = context.createBuffer(1, Math.floor(context.sampleRate * .24), context.sampleRate);
+    const samples = noise.getChannelData(0);
+    for (let index = 0; index < samples.length; index += 1) samples[index] = Math.random() * 2 - 1;
+    this.context = context;
+    this.master = master;
+    this.noise = noise;
+    return context;
   }
 
   private start(source: Source, nodes: readonly AudioNode[], at: number, duration: number) {
@@ -82,15 +67,17 @@ export class EntranceSound {
   }
 
   playDoor() {
-    if (!this.enabled || this.context?.state !== 'running') return;
-    const at = this.context.currentTime + .008;
-    this.tap(at, 158, .23, .14);
-    this.tone(at + .12, 78, 48, .15, .70);
-    this.tap(at + .22, 92, .105, .20);
-    this.tap(at + .66, 136, .11, .19);
+    this.gate.play(time => {
+      const at = time + .008;
+      this.tap(at, 158, .23, .14);
+      this.tone(at + .12, 78, 48, .15, .70);
+      this.tap(at + .22, 92, .105, .20);
+      this.tap(at + .66, 136, .11, .19);
+    });
   }
 
   cut() {
+    this.gate.cancel();
     for (const [node, graph] of this.voices) {
       node.stop();
       graph.forEach(item => item.disconnect());

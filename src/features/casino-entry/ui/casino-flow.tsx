@@ -1,3 +1,4 @@
+import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { TransitionEvent } from 'react';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../../../shared/contracts/casino-entry';
@@ -61,13 +62,11 @@ function CountdownChip({ deadline, offset, exiting }: { deadline: number; offset
   </div>;
 }
 
-function VipLobby({ info, room, setReady, leave, muted, soundButton, opening, deadline }: {
+function VipLobby({ info, room, setReady, leave, opening, deadline }: {
   info: ConnectionView;
   room: string;
   setReady: (ready: boolean) => void;
   leave: () => void;
-  muted: boolean;
-  soundButton: () => void;
   opening: boolean;
   deadline: number | null;
 }) {
@@ -91,7 +90,6 @@ function VipLobby({ info, room, setReady, leave, muted, soundButton, opening, de
           <h1 ref={title} tabIndex={-1}>VIP LOUNGE</h1>
           <p className="vip-room">ROOM <strong>{room}</strong></p>
         </div>
-        <button className="casino-plain vip-sound" aria-pressed={!muted} aria-label={muted ? '効果音をオン' : '効果音をオフ'} onClick={soundButton}>音 {muted ? 'OFF' : 'ON'}</button>
       </header>
       <div className="vip-table-layout" aria-label="参加席">
         {slots.map(slot => <SeatTile key={slot} slot={slot} seat={lobby?.seats.find(seat => seat.slot === slot)} playerId={playerId} hostId={lobby?.hostId} />)}
@@ -131,17 +129,16 @@ function CasinoStarted({ room, leave }: { room: string; leave: () => void }) {
 }
 
 export function CasinoFlow({ connection, audio }: { connection: CasinoConnection; audio: EntranceSound }) {
+  useAudioActivation(audio.unlock);
   const info = useSyncExternalStore(connection.subscribe, connection.getSnapshot);
   const [entrance, setEntrance] = useState<EntrancePhase>('LOADING');
   const [progress, setProgress] = useState(casinoAssets.getProgress);
   const [failed, setFailed] = useState<readonly string[]>([]);
-  const [muted, setMuted] = useState(!audio.isEnabled);
   const [holdDeadline, setHoldDeadline] = useState<number | null>(null);
   const [showCompletion, setShowCompletion] = useState(false);
   const entranceRef = useRef<EntrancePhase>('LOADING');
   const alive = useRef(false);
   const loaderBusy = useRef(false);
-  const soundBusy = useRef(false);
   const enterButton = useRef<HTMLButtonElement>(null);
   const retryButton = useRef<HTMLButtonElement>(null);
   const focusedByExit = useRef(false);
@@ -234,14 +231,6 @@ export function CasinoFlow({ connection, audio }: { connection: CasinoConnection
     moveTo('READY_TO_ENTER');
   }
 
-  async function toggleSound() {
-    if (soundBusy.current) return;
-    soundBusy.current = true;
-    try { setMuted(!(await audio.enable(muted))); }
-    catch { setMuted(true); }
-    finally { soundBusy.current = false; }
-  }
-
   if (entrance === 'ENTERED' && showCompletion) return <div className="casino-flow" data-phase="IN_GAME">
     <CasinoStarted room={connection.room} leave={leave} />
   </div>;
@@ -253,7 +242,7 @@ export function CasinoFlow({ connection, audio }: { connection: CasinoConnection
 
   return <div className="casino-flow" data-phase={phase}>
     {(opening || entered) && <VipLobby info={info} room={connection.room} setReady={ready => connection.setReady(ready)}
-      leave={leave} muted={muted} soundButton={toggleSound} opening={opening} deadline={gameStarted ? holdDeadline : deadline} />}
+      leave={leave} opening={opening} deadline={gameStarted ? holdDeadline : deadline} />}
     {!entered && <main className="casino-entrance" id="casino-entrance" data-opening={opening} inert={opening}>
       <div className="casino-hinge" aria-hidden="true">
         <div className="casino-door casino-door--left" />
@@ -281,8 +270,6 @@ export function CasinoFlow({ connection, audio }: { connection: CasinoConnection
             <button className="casino-action" ref={retryButton} id="retry-assets" onClick={load}><span>再試行</span></button>
           </div>}
         </div>
-        <button className="casino-plain entrance-sound" aria-pressed={!muted} aria-label={muted ? '効果音をオン' : '効果音をオフ'}
-          onClick={toggleSound}>音 {muted ? 'OFF' : 'ON'}</button>
       </div>
     </main>}
   </div>;

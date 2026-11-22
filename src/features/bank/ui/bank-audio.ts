@@ -1,3 +1,4 @@
+import { createAudioContext, CueAudio } from '../../../shared/audio/cue-audio';
 import type { BankBeat, BankDirection } from '../model/bank-model';
 import type { BankAudioPort } from '../application/bank-player';
 
@@ -16,10 +17,6 @@ interface Tone extends Envelope {
   shape?: OscillatorType;
 }
 
-declare global {
-  interface Window { webkitAudioContext?: typeof AudioContext; }
-}
-
 const FLOOR = .0001;
 
 export class BankAudio implements BankAudioPort {
@@ -27,16 +24,14 @@ export class BankAudio implements BankAudioPort {
   private output: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private playing = new Map<VoiceSource, readonly AudioNode[]>();
-  private active = false;
-  private volume = .64;
-  private setting = 0;
+  private readonly gate = new CueAudio(() => this.connect());
+  readonly unlock = this.gate.unlock;
 
   private connect() {
-    const Audio = window.AudioContext ?? window.webkitAudioContext;
-    if (!Audio) return null;
-    const context = new Audio();
+    const context = createAudioContext();
+    if (!context) return null;
     const output = context.createGain();
-    output.gain.value = this.volume;
+    output.gain.value = 1;
     const limiter = context.createDynamicsCompressor();
     limiter.threshold.value = -11;
     limiter.ratio.value = 4;
@@ -50,28 +45,8 @@ export class BankAudio implements BankAudioPort {
     return context;
   }
 
-  async enable(active: boolean) {
-    const setting = ++this.setting;
-    if (!active) {
-      this.active = false;
-      this.cut();
-      return false;
-    }
-    if (navigator.userActivation?.isActive === false && this.context?.state !== 'running') return this.active;
-    const context = this.context ?? this.connect();
-    if (!context) return false;
-    if (context.state !== 'running') await context.resume();
-    if (this.setting === setting) this.active = context.state === 'running';
-    return this.active;
-  }
-
-  setVolume(value: number) {
-    if (!Number.isFinite(value)) return;
-    this.volume = Math.max(0, Math.min(1, value));
-    if (this.output && this.context) this.output.gain.setTargetAtTime(this.volume, this.context.currentTime, .02);
-  }
-
   cut() {
+    this.gate.cancel();
     for (const [source, nodes] of this.playing) {
       source.stop();
       for (const node of nodes) node.disconnect();
@@ -136,8 +111,10 @@ export class BankAudio implements BankAudioPort {
   }
 
   cue(beat: BankBeat, reduced: boolean, direction: BankDirection) {
-    if (!this.active || this.context?.state !== 'running') return;
-    const at = this.context.currentTime + .007;
+    this.gate.play(time => this.synthesize(beat, reduced, direction, time + .007));
+  }
+
+  private synthesize(beat: BankBeat, reduced: boolean, direction: BankDirection, at: number) {
     const deposit = direction === 'deposit';
     switch (beat.cue) {
       case 'confirm':

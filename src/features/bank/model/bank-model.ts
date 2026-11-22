@@ -1,13 +1,14 @@
+export type CoinValue = 10 | 50 | 100;
+
 export interface Coin {
   readonly id: string;
-  readonly value: number;
+  readonly value: CoinValue;
 }
 
 export const DEMO_PLAYER = { id: 'player-1', name: 'PLAYER 1' };
 export const DEMO_WALLET: readonly Coin[] = [
+  { id: 'hundred-a', value: 100 },
   { id: 'fifty-a', value: 50 },
-  { id: 'fifty-b', value: 50 },
-  { id: 'fifty-c', value: 50 },
   { id: 'ten-a', value: 10 },
   { id: 'ten-b', value: 10 },
   { id: 'ten-c', value: 10 },
@@ -16,10 +17,14 @@ export const DEMO_WALLET: readonly Coin[] = [
 ];
 
 export const DEMO_RESERVE: readonly Coin[] = [
+  { id: 'bank-hundred-a', value: 100 },
+  { id: 'bank-hundred-b', value: 100 },
   { id: 'bank-fifty-a', value: 50 },
-  { id: 'bank-fifty-b', value: 50 },
   { id: 'bank-ten-a', value: 10 },
   { id: 'bank-ten-b', value: 10 },
+  { id: 'bank-ten-c', value: 10 },
+  { id: 'bank-ten-d', value: 10 },
+  { id: 'bank-ten-e', value: 10 },
 ];
 
 export type BankDirection = 'withdraw' | 'deposit';
@@ -30,12 +35,8 @@ export interface BankTransaction {
   readonly amount: number;
 }
 
-export const DEMO_TRANSACTIONS: Readonly<Record<BankDirection, BankTransaction>> = {
-  withdraw: { type: 'withdraw', playerId: DEMO_PLAYER.id, amount: 100 },
-  deposit: { type: 'deposit', playerId: DEMO_PLAYER.id, amount: 100 },
-};
-
-export const DEMO_TRANSACTION = DEMO_TRANSACTIONS.withdraw;
+export const DEFAULT_BANK_AMOUNT = 100;
+export const BANK_AMOUNT_STEP = 10;
 
 export function bankBalance(wallet: readonly Coin[]) {
   return wallet.reduce((sum, coin) => sum + coin.value, 0);
@@ -46,13 +47,20 @@ export function readBankTransaction(value: unknown, playerId: string): BankTrans
     throw new TypeError('取引種別には withdraw または deposit を指定してください。');
   }
   if (!('playerId' in value) || value.playerId !== playerId) throw new RangeError('対象のプレイヤーが見つかりません。');
-  if (!('amount' in value) || typeof value.amount !== 'number' || !Number.isSafeInteger(value.amount) || value.amount <= 0) {
-    throw new RangeError('取引額は正の整数で指定してください。');
+  return { type: value.type, playerId, amount: readBankAmount('amount' in value ? value.amount : undefined) };
+}
+
+function readBankAmount(value: unknown) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0 || value % BANK_AMOUNT_STEP !== 0) {
+    throw new RangeError(`取引額は正の${BANK_AMOUNT_STEP}点単位で入力してください。`);
   }
-  return { type: value.type, playerId, amount: value.amount };
+  return value;
 }
 
 export function selectPayment(wallet: readonly Coin[], amount: number): readonly Coin[] {
+  readBankAmount(amount);
+  const available = bankBalance(wallet);
+  if (amount > available) throw new RangeError(`移動元の残高は${available}点までです。`);
   const choices = new Map<number, readonly Coin[]>([[0, []]]);
   for (const coin of [...wallet].sort((left, right) => right.value - left.value)) {
     for (const [total, choice] of [...choices]) {

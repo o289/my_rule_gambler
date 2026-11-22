@@ -52,7 +52,6 @@ body:has(.tray-dialog[open]) { overflow: hidden; }
   letter-spacing: 0;
 }
 
-.salon-utility { display: inline-flex; align-items: center; gap: 9px; }
 .room-chip {
   color: var(--salon-muted);
   font: 700 .765rem/1 var(--salon-serif);
@@ -273,7 +272,6 @@ body:has(.tray-dialog[open]) { overflow: hidden; }
   .dice-salon { width: calc(100% - 18px); }
   .salon-mark { font-size: .83rem; letter-spacing: .13em; gap: 3px; }
   .salon-mark > span { width: 22px; }
-  .salon-utility { gap: 4px; }
   .room-chip { font-size: .67rem; }
   .tray-dialog { width: calc(100% - 12px); }
   .tray-status { font-size: .70rem; }

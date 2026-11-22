@@ -707,7 +707,7 @@ body {
   position: relative;
   z-index: 16;
 }
-.transport button, .audio-toggle {
+.transport button {
   min-height: 43px;
   padding: 3px 10px;
   border: 1px solid #785333;
@@ -770,36 +770,10 @@ body {
 .effect-buttons button[aria-pressed="true"] { border-color: #ffce81; background: linear-gradient(142deg, #654022, #3d2616); color: #fff0cd; }
 .effect-buttons button > svg { color: #be945f; }
 
-.sound-panel {
-  display: grid;
-  gap: 8px;
-  margin-top: 18px;
-  padding-top: 11px;
-  border-top: 1px solid #614127;
-}
-.sound-header, .volume-label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.audio-toggle { min-width: 54px; min-height: 40px; color: #e3bb87; }
-.audio-toggle[aria-pressed="true"] { background: #54381f; border-color: #dfaa63; color: #fff0cb; }
-.audio-toggle:disabled { opacity: .6; }
-.volume-label { color: #d6b999; font-size: .88rem; }
-.volume-label output { color: #f8d29c; font-variant-numeric: tabular-nums; }
-.sound-panel input {
-  width: 100%;
-  min-height: 28px;
-  margin: 0;
-  accent-color: #e0ad6c;
-}
-.audio-error { margin: 0; color: #fbbeb2; font-size: .82rem; }
-
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 @media (hover: hover) {
-  .transport button:hover:not(:disabled), .audio-toggle:hover:not(:disabled) { background: #3c2819; border-color: #c49864; }
+  .transport button:hover:not(:disabled) { background: #3c2819; border-color: #c49864; }
   .effect-buttons button:hover { border-color: #d9a56e; background: #4a301f; }
 }
 
@@ -811,8 +785,7 @@ body {
   .effects-layout { grid-template-columns: minmax(0, 1fr); gap: 11px; }
   .effect-stage { min-height: clamp(326px, 112vw, 560px); }
   .stage-footer { min-height: 65px; padding-inline: 11px; }
-  .transport button, .audio-toggle { min-height: 44px; }
-  .sound-panel input { min-height: 44px; }
+  .transport button { min-height: 44px; }
 }
 
 @media (max-width: 620px) {

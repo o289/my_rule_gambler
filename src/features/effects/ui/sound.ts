@@ -1,3 +1,4 @@
+import { createAudioContext, CueAudio } from '../../../shared/audio/cue-audio';
 import { TUMBLE_DURATION } from '../../dice/model/die-motion';
 import type { Cue, EffectKind } from '../model/effect-model';
 import type { EffectAudio } from '../application/effect-player';
@@ -19,28 +20,22 @@ interface Voice {
 
 const FLOOR = .0001;
 
-declare global {
-  interface Window { webkitAudioContext?: typeof AudioContext; }
-}
-
 export class SoundManager implements EffectAudio {
   private context: AudioContext | null = null;
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private voices = new Set<Voice>();
-  private enabled = false;
-  private settingVersion = 0;
-  private volume = .62;
+  private readonly gate = new CueAudio(() => this.initialize());
+  readonly unlock = this.gate.unlock;
 
   private initialize() {
-    const Context = globalThis.AudioContext ?? window.webkitAudioContext;
-    if (typeof Context !== 'function') return null;
-    const ctx = new Context();
+    const ctx = createAudioContext();
+    if (!ctx) return null;
     const master = ctx.createGain();
     const compressor = ctx.createDynamicsCompressor();
     compressor.threshold.value = -10;
     compressor.ratio.value = 4;
-    master.gain.value = this.volume;
+    master.gain.value = 1;
     master.connect(compressor).connect(ctx.destination);
     const noise = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * 1.65), ctx.sampleRate);
     const samples = noise.getChannelData(0);
@@ -51,28 +46,8 @@ export class SoundManager implements EffectAudio {
     return ctx;
   }
 
-  async enable(next: boolean) {
-    const version = ++this.settingVersion;
-    if (!next) {
-      this.enabled = false;
-      this.cut();
-      return false;
-    }
-    if (navigator.userActivation?.isActive === false && this.context?.state !== 'running') return this.enabled;
-    const audio = this.context ?? this.initialize();
-    if (!audio) return false;
-    if (audio.state !== 'running') await audio.resume();
-    if (version === this.settingVersion) this.enabled = audio.state === 'running';
-    return this.enabled;
-  }
-
-  setVolume(volume: number) {
-    if (!Number.isFinite(volume)) return;
-    this.volume = Math.min(1, Math.max(0, volume));
-    if (this.master && this.context) this.master.gain.setTargetAtTime(this.volume, this.context.currentTime, .019);
-  }
-
   cut() {
+    this.gate.cancel();
     for (const voice of this.voices) {
       voice.source.stop();
       for (const node of voice.nodes) node.disconnect();
@@ -160,8 +135,10 @@ export class SoundManager implements EffectAudio {
 
   playCue(effect: EffectKind, cue: Cue, reduced: boolean) {
     if (cue === 'silence') { this.cut(); return; }
-    if (!this.enabled || this.context?.state !== 'running') return;
-    const at = this.context.currentTime + .008;
+    this.gate.play(time => this.synthesize(effect, cue, reduced, time + .008));
+  }
+
+  private synthesize(effect: EffectKind, cue: Cue, reduced: boolean, at: number) {
 
     switch (effect) {
       case 'DICE_STOP':

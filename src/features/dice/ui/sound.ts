@@ -1,45 +1,32 @@
+import { createAudioContext, CueAudio } from '../../../shared/audio/cue-audio';
 import type { Impact } from '../../../shared/contracts/dice';
 
 type Source = OscillatorNode | AudioBufferSourceNode;
 const QUIET = .0001;
-
-declare global {
-  interface Window { webkitAudioContext?: typeof AudioContext }
-}
 
 export class DiceSound {
   private context: AudioContext | undefined;
   private master: GainNode | undefined;
   private noise: AudioBuffer | undefined;
   private voices = new Map<Source, readonly AudioNode[]>();
-  private enabled = false;
+  private readonly gate = new CueAudio(() => this.initialize());
+  readonly unlock = this.gate.unlock;
   private hitAt = -Infinity;
 
-  async enable(next: boolean) {
-    if (!next) {
-      this.enabled = false;
-      this.cut();
-      return false;
-    }
-    if (navigator.userActivation?.isActive === false && this.context?.state !== 'running') return false;
-    if (!this.context) {
-      const Audio = window.AudioContext ?? window.webkitAudioContext;
-      if (!Audio) return false;
-      const context = new Audio();
-      const master = context.createGain();
-      const compressor = context.createDynamicsCompressor();
-      master.gain.value = .62;
-      master.connect(compressor).connect(context.destination);
-      const noise = context.createBuffer(1, Math.floor(context.sampleRate * .24), context.sampleRate);
-      const samples = noise.getChannelData(0);
-      for (let index = 0; index < samples.length; index += 1) samples[index] = Math.random() * 2 - 1;
-      this.context = context;
-      this.master = master;
-      this.noise = noise;
-    }
-    if (this.context.state !== 'running') await this.context.resume();
-    this.enabled = this.context.state === 'running';
-    return this.enabled;
+  private initialize() {
+    const context = createAudioContext();
+    if (!context) return null;
+    const master = context.createGain();
+    const compressor = context.createDynamicsCompressor();
+    master.gain.value = 1;
+    master.connect(compressor).connect(context.destination);
+    const noise = context.createBuffer(1, Math.floor(context.sampleRate * .24), context.sampleRate);
+    const samples = noise.getChannelData(0);
+    for (let index = 0; index < samples.length; index += 1) samples[index] = Math.random() * 2 - 1;
+    this.context = context;
+    this.master = master;
+    this.noise = noise;
+    return context;
   }
 
   private start(source: Source, nodes: readonly AudioNode[], at: number, duration: number) {
@@ -83,18 +70,22 @@ export class DiceSound {
   }
 
   impacts(list: readonly Impact[]) {
-    if (!this.enabled || this.context?.state !== 'running') return;
     const hit = list[0];
-    const at = this.context.currentTime + .055;
-    if (!hit || hit.strength < .065 || at - this.hitAt < .047) return;
-    this.hitAt = at;
-    const frequency = hit.kind === 'floor' ? 174 : hit.kind === 'wall' ? 240 : 394;
-    this.tap(at, frequency + hit.strength * 60, .05 + hit.strength * .33, .08 + hit.strength * .046);
+    if (!hit || hit.strength < .065) return;
+    this.gate.play(time => {
+      const at = time + .055;
+      if (at - this.hitAt < .047) return;
+      this.hitAt = at;
+      const frequency = hit.kind === 'floor' ? 174 : hit.kind === 'wall' ? 240 : 394;
+      this.tap(at, frequency + hit.strength * 60, .05 + hit.strength * .33, .08 + hit.strength * .046);
+    });
   }
 
   cue(kind: 'cup' | 'result' | 'confirm') {
-    if (!this.enabled || this.context?.state !== 'running') return;
-    const at = this.context.currentTime + .008;
+    this.gate.play(time => this.synthesize(kind, time + .008));
+  }
+
+  private synthesize(kind: 'cup' | 'result' | 'confirm', at: number) {
     if (kind === 'cup') this.tap(at, 228, .12, .093);
     if (kind === 'confirm') this.tap(at, 286, .135, .092);
     if (kind === 'result') {
@@ -105,6 +96,7 @@ export class DiceSound {
   }
 
   cut() {
+    this.gate.cancel();
     for (const [node, graph] of this.voices) {
       node.stop();
       graph.forEach(item => item.disconnect());

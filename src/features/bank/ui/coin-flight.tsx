@@ -67,7 +67,10 @@ export function CoinFlights({ flights, stage, direction }: { flights: ReadonlyMa
       context?.setTransform(ratio, 0, 0, ratio, 0, 0);
       const target = localCenter(available.getBoundingClientRect(), boundary);
       for (const [id, flight] of flights) {
-        const anchor = scene.querySelector<HTMLElement>(`[data-coin-id="${CSS.escape(id)}"] .coin-in-tray`);
+        const selector = deposit
+          ? `[data-flight-target="${CSS.escape(id)}"]`
+          : `[data-coin-id="${CSS.escape(id)}"] .coin-in-tray`;
+        const anchor = scene.querySelector<HTMLElement>(selector);
         const shell = shells.current.get(id);
         const rotor = rotors.current.get(id);
         if (!anchor || !shell || !rotor) continue;
@@ -164,7 +167,7 @@ export function CoinFlights({ flights, stage, direction }: { flights: ReadonlyMa
     <div className="flight-layer" aria-hidden="true">
       <canvas ref={trails} />
       {[...flights.values()].map(({ coin }) => (
-        <div className="flying-coin" data-flying-coin={coin.id} key={coin.id} ref={element => {
+        <div className="flying-coin" data-flying-coin={coin.id} data-coin-value={coin.value} key={coin.id} ref={element => {
           if (element) shells.current.set(coin.id, element);
           else shells.current.delete(coin.id);
         }}>

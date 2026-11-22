@@ -179,7 +179,6 @@ button { font-family: inherit; }
   cursor: pointer;
 }
 .casino-plain:hover { border-color: #f0ce9b; color: #ffefce; }
-.entrance-sound { position: absolute; bottom: max(env(safe-area-inset-bottom), 15px); right: 18px; }
 .casino-progress, .casino-load-error {
   width: min(350px, 100% - 36px);
   padding: 13px 15px;
@@ -255,7 +254,6 @@ button { font-family: inherit; }
   padding-bottom: 16px;
 }
 .vip-exit { justify-self: start; }
-.vip-sound { justify-self: end; }
 .vip-title { text-align: center; min-width: 0; }
 .vip-crown { display: block; margin: 0 auto 7px; width: 35px; color: #d8ab72; }
 .vip-title h1 {
