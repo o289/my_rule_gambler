@@ -149,13 +149,16 @@ export class DiceConnection {
         break;
       case 'state': {
         const newRoll = message.roll?.id !== this.current.roll?.id;
+        const nextMatch = message.match ?? this.current.match;
+        const newTurn = nextMatch !== null && this.current.game !== null
+          && message.state.turnSequence !== this.current.game.turnSequence;
         if (message.roll) this.frames.push(message.roll.latest);
         this.update({
-          game: message.state, match: message.match ?? this.current.match, roll: message.roll, pending: false,
+          game: message.state, match: nextMatch, roll: message.roll, pending: false,
           placement: this.current.game?.boardSeed === message.state.boardSeed
             ? confirmedPlacement(this.current.game, message.state) ?? this.current.placement
             : null,
-          tray: newRoll ? message.roll?.id ?? null : this.current.tray,
+          tray: newTurn ? null : newRoll ? message.roll?.id ?? null : this.current.tray,
           metrics: newRoll ? null : this.current.metrics,
           problem: '',
         });
@@ -189,7 +192,7 @@ export class DiceConnection {
   roll(kind: 'roll' | 'reroll') {
     if (this.current.pending || this.current.status !== 'online') return;
     const requestId = globalThis.crypto?.randomUUID?.() ?? `request-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    if (this.send({ type: kind, requestId })) this.update({ pending: true, problem: '' });
+    if (this.send({ type: kind, requestId, turnSequence: this.current.game?.turnSequence })) this.update({ pending: true, problem: '' });
   }
 
   confirm(rollId: string) {

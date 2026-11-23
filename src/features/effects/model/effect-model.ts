@@ -70,10 +70,13 @@ export interface Beat {
   cue: Cue;
 }
 
+export const TURN_CHANGE_DURATION_MS = 690;
+export const REDUCED_TURN_CHANGE_DURATION_MS = 200;
+
 const timeline: Record<Exclude<EffectKind, 'ONE_CELL_COMEBACK' | 'BOARD_SCORE'>, readonly Beat[]> = {
   TURN_CHANGE: [
     { at: 0, cue: 'start' },
-    { at: 690, cue: 'finish' },
+    { at: TURN_CHANGE_DURATION_MS, cue: 'finish' },
   ],
   GEM_PLACEMENT: [
     { at: 0, cue: 'start' },
@@ -145,7 +148,7 @@ export function beatsFor(request: EffectRequest, reduced: boolean, scenario: Pic
     case 'ONE_CELL_COMEBACK':
       return oneCellComebackBeats(request.params.gem, reduced, scenario.turn);
     case 'TURN_CHANGE':
-      return reduced ? [{ at: 0, cue: 'start' }, { at: 200, cue: 'finish' }] as const : timeline.TURN_CHANGE;
+      return reduced ? [{ at: 0, cue: 'start' }, { at: REDUCED_TURN_CHANGE_DURATION_MS, cue: 'finish' }] as const : timeline.TURN_CHANGE;
     case 'BOARD_SCORE': {
       const row = scenario.board.rows.find(item => item.id === request.params.target.rowId);
       const columns = row ? playableColumns(scenario.board, row).length : 0;

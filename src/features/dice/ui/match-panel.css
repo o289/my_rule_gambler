@@ -32,6 +32,7 @@
   gap: 8px;
   min-width: 0;
 }
+.match-wallet-player { position: relative; isolation: isolate; min-width: 0; border-radius: 8px; }
 .match-wallets .player-area {
   position: relative;
   inset: auto;

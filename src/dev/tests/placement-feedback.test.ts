@@ -10,7 +10,7 @@ test('every playable cell can receive placement feedback, including non-goals an
   const board = createGoalBoard(18);
   const occupied = new Map(initialState(board).occupied);
   const before: GameState = {
-    seats: [], turnId: null, phase: 'placement', revision: 1, config: DEFAULT_CONFIG, boardSeed: 18,
+    seats: [], turnId: null, turnSequence: 1, turnNotice: null, phase: 'placement', revision: 1, config: DEFAULT_CONFIG, boardSeed: 18,
     placements: [], results: [], remaining: [], placedThisRoll: false, hasLegalPlacement: true,
   };
   let state = before;

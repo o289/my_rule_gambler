@@ -5,6 +5,8 @@ import type { DiceResult, GameState, Placement, RollConfig } from '../../../shar
 
 export interface DiceGameState {
   turnId: string | null;
+  turnSequence: number;
+  turnNotice: GameState['turnNotice'];
   phase: GameState['phase'];
   revision: number;
   config: RollConfig;
@@ -22,11 +24,13 @@ export interface PlaceDieCommand {
   column?: number;
 }
 
-export interface DiceGamePlayer { id: string; online: boolean }
+export interface DiceGamePlayer { id: string; online: boolean; hasDice?: boolean }
 
 export function initialDiceGameState(): DiceGameState {
   return {
     turnId: null,
+    turnSequence: 0,
+    turnNotice: null,
     phase: 'ready',
     revision: 0,
     config: { ...DEFAULT_CONFIG },
@@ -97,7 +101,7 @@ export function createDiceRollRequest(
 }
 
 export function setFirstTurn(state: DiceGameState, playerId: string) {
-  return state.turnId === null ? { ...state, turnId: playerId } : state;
+  return state.turnId === null ? { ...state, turnId: playerId, turnSequence: state.turnSequence + 1 } : state;
 }
 
 export function selectTurnAfterPrune(state: DiceGameState, players: readonly DiceGamePlayer[]) {
@@ -195,17 +199,48 @@ export function finishTurn(
   state: DiceGameState,
   players: readonly DiceGamePlayer[],
   currentPlayerId: string,
+  clearRoll = false,
+): DiceGameState {
+  return advanceTurn(state, players, currentPlayerId, 1, state.turnNotice, clearRoll);
+}
+
+export function finishTurnAfterPlacement(
+  state: DiceGameState,
+  players: readonly DiceGamePlayer[],
+  currentPlayerId: string,
+): DiceGameState {
+  return advanceTurn(state, players, currentPlayerId, 0, state.turnNotice, true);
+}
+
+export function finishTurnAfterNoLegalPlacement(
+  state: DiceGameState,
+  players: readonly DiceGamePlayer[],
+  currentPlayerId: string,
+): DiceGameState {
+  return advanceTurn(state, players, currentPlayerId, 0, 'no-legal-placement', true);
+}
+
+function advanceTurn(
+  state: DiceGameState,
+  players: readonly DiceGamePlayer[],
+  currentPlayerId: string,
+  revisionDelta: number,
+  turnNotice: DiceGameState['turnNotice'],
+  clearRoll: boolean,
 ): DiceGameState {
   const start = players.findIndex(player => player.id === currentPlayerId);
   const rotated = start < 0 ? players : [...players.slice(start + 1), ...players.slice(0, start + 1)];
-  const next = rotated.find(player => player.online);
+  const next = rotated.find(player => player.online) ?? rotated.find(player => player.hasDice);
   return {
     ...state,
-    turnId: next?.id ?? currentPlayerId,
+    turnId: next?.id ?? null,
+    turnSequence: state.turnSequence + 1,
+    turnNotice,
     phase: 'ready',
+    ...(clearRoll ? { rollId: null, results: [] } : {}),
     remaining: [],
     placedThisRoll: false,
-    revision: state.revision + 1,
+    revision: state.revision + revisionDelta,
   };
 }
 

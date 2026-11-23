@@ -8,9 +8,13 @@ import {
   confirmRoll,
   endTurnStatus,
   finishTurn,
+  finishTurnAfterNoLegalPlacement,
+  finishTurnAfterPlacement,
+  hasLegalPlacement,
   initialDiceGameState,
   placeDie,
   rollRequestStatus,
+  setFirstTurn,
 } from '../../platform/server/core/dice-game';
 import { advanceRoll } from '../../platform/server/core/dice/roll-engine';
 import {
@@ -94,6 +98,64 @@ test('dice rules authorize rolls and update confirm, placement, and turn as one 
   assert.equal(ended.turnId, 'p2');
   assert.equal(ended.phase, 'ready');
   assert.deepEqual(ended.remaining, []);
+});
+
+test('standard turn sequence skips empty hands and auto-ends a confirmed roll with no legal placement', () => {
+  const board: BoardDefinition = {
+    rows: [{ id: 'only', score: 10, goalColumnId: 'ruby', cells: { ruby: { requiredGem: 'ruby' } } }],
+    columns: [{ id: 'ruby', gem: 'ruby' }],
+  };
+  const initial = setFirstTurn(initialDiceGameState(), 'p1');
+  const rolling = beginRoll(initial, 'roll-empty', 'initial', 1, [], ['p1-die-1']);
+  const confirming = { ...rolling.state, phase: 'confirm' as const };
+  const placement = confirmRoll(confirming, 'p1', 'roll-empty', [{ id: 'p1-die-1', gem: 'sapphire', approximate: false }]);
+  assert.ok(placement);
+  assert.equal(hasLegalPlacement(board, placement), false);
+  const ended = finishTurnAfterNoLegalPlacement(placement, [
+    { id: 'p1', online: false, hasDice: true },
+    { id: 'p2', online: false, hasDice: false },
+    { id: 'p3', online: false, hasDice: true },
+  ], 'p1');
+  assert.equal(ended.turnId, 'p3', 'an offline fixed-seat participant with dice prevents a dead turn');
+  assert.equal(ended.turnSequence, initial.turnSequence + 1);
+  assert.equal(ended.revision, placement.revision, 'the CONFIRM transition publishes only one revision');
+  assert.equal(ended.phase, 'ready');
+  assert.equal(ended.turnNotice, 'no-legal-placement');
+  assert.deepEqual(ended.results, []);
+});
+
+test('standard turn ends after the last die in the current roll and reroll keeps only unplaced IDs', () => {
+  const board: BoardDefinition = {
+    rows: [{ id: 'row', score: 10 }],
+    columns: [{ id: 'left', gem: 'ruby' }, { id: 'right', gem: 'sapphire' }],
+  };
+  const initial = setFirstTurn(initialDiceGameState(), 'p1');
+  const rolling = beginRoll(initial, 'roll-used', 'initial', 2, [], ['p1-die-1', 'p1-die-2']);
+  const confirmed = confirmRoll({ ...rolling.state, phase: 'confirm' }, 'p1', 'roll-used', [
+    { id: 'p1-die-1', gem: 'ruby', approximate: false },
+    { id: 'p1-die-2', gem: 'sapphire', approximate: false },
+  ]);
+  assert.ok(confirmed);
+  const first = placeDie(confirmed, board, { rollId: 'roll-used', dieId: 'p1-die-1', row: 0, column: 0 });
+  assert.equal(first.status, 'placed');
+  if (first.status !== 'placed') return;
+  const reroll = beginRoll(first.state, 'roll-reroll', 'reroll', 5,
+    [{ id: 'p1-die-1' }, { id: 'p1-die-2' }, { id: 'reserve-die' }]);
+  assert.deepEqual(reroll.diceIds, ['p1-die-2']);
+  assert.equal(reroll.state.placedThisRoll, true, 'minimum-placement state remains until the reroll is confirmed');
+
+  const second = placeDie(first.state, board, { rollId: 'roll-used', dieId: 'p1-die-2', row: 0, column: 1 });
+  assert.equal(second.status, 'placed');
+  if (second.status !== 'placed') return;
+  const next = finishTurnAfterPlacement(second.state, [
+    { id: 'p1', online: true, hasDice: true }, { id: 'p2', online: true, hasDice: true },
+  ], 'p1');
+  assert.equal(next.revision, second.state.revision, 'automatic turn change does not hide the placement event');
+  assert.equal(next.turnId, 'p2');
+  assert.equal(next.turnSequence, initial.turnSequence + 1);
+  assert.equal(next.rollId, null);
+  assert.deepEqual(next.results, []);
+  assert.deepEqual(next.remaining, []);
 });
 
 test('fixed-step roll engine caps catch-up and sends the final settled frame after periodic captures', () => {

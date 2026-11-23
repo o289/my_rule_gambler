@@ -15,6 +15,8 @@ import { MatchPanel } from './match-panel';
 import { DiceSound } from './sound';
 import { preloadDice } from './face-canvases';
 import { placementCandidates } from '../model/placement-feedback';
+import { TURN_CHANGE_DURATION_MS, REDUCED_TURN_CHANGE_DURATION_MS } from '../../effects/model/effect-model';
+import { TurnAnnouncement } from '../../effects/ui/settlement-scenes';
 import './style.css';
 
 
@@ -115,6 +117,7 @@ function TrayDialog({ info, setFps, children, onClose, focusTarget, stream, onCu
         </Suspense>
         <div className="tray-result" data-settled={ready}>
           {ready ? <ResultStrip list={roll.results} /> : <p>すべてのダイスが止まると出目が表示されます。</p>}
+          {info.game?.turnNotice === 'no-legal-placement' && <p className="turn-notice" role="status">置けるマスがありません。手番を交代しました。</p>}
         </div>
         <div className="tray-actions">
           <button type="button" id="confirm-dice" className="gold-button" disabled={!ready || !open || info.status !== 'online'}
@@ -138,7 +141,22 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const { game, roll } = info;
   const own = Boolean(game?.turnId && game.turnId === info.playerId);
   const inPlacement = game?.phase === 'placement';
-  const canAct = own && info.status === 'online' && !info.pending && !info.match?.result;
+  const hasStandardMatch = info.match !== null;
+  const [announcedTurnSequence, setAnnouncedTurnSequence] = useState<number | null>(null);
+  const current = game?.seats.find(item => item.id === game.turnId);
+  useEffect(() => {
+    if (!hasStandardMatch || !game || game.phase !== 'ready' || game.turnSequence < 1 || info.match?.result) return;
+    const sequence = game.turnSequence;
+    const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      ? REDUCED_TURN_CHANGE_DURATION_MS : TURN_CHANGE_DURATION_MS;
+    const timer = window.setTimeout(() => setAnnouncedTurnSequence(sequence), duration);
+    return () => window.clearTimeout(timer);
+  }, [hasStandardMatch, game?.phase, game?.turnSequence, Boolean(info.match?.result)]);
+  const turnNeedsAnnouncement = Boolean(hasStandardMatch && game?.phase === 'ready' && game.turnSequence > 0
+    && !info.match?.result && announcedTurnSequence !== game.turnSequence);
+  const turnGateReady = !turnNeedsAnnouncement;
+  const showTurnChange = Boolean(turnNeedsAnnouncement && current && game);
+  const canAct = own && info.status === 'online' && !info.pending && !info.match?.result && turnGateReady;
   const [monitor, setMonitor] = useState(false);
   const [fps, setFps] = useState<number | null>(null);
   const [choice, setChoice] = useState<{ rollId: string; dieId: string }>();
@@ -189,7 +207,6 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   }
 
   const seat = game?.seats.find(item => item.id === info.playerId);
-  const current = game?.seats.find(item => item.id === game.turnId);
   const waitingForBoard = Boolean(boardAdapter.requiresServerBoard && game?.boardSeed === undefined);
   const devReroll = Boolean(info.dev && game && !game.placedThisRoll);
   const perf = <PerformanceMonitor info={info} fps={fps} own={own} expanded={monitor} expand={setMonitor}
@@ -201,6 +218,10 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
       <span className="room-chip" lang="en">{connection.room.toUpperCase()}</span>
     </header>
     <div className="salon-title"><h1>宝石サイコロ 3D</h1><span role="status">{seat?.name ?? (info.status === 'offline' ? '再接続中' : '接続中')} {seat && (own ? '・あなたの手番' : current ? `・${current.name} の手番` : '')}</span></div>
+    {showTurnChange && current && game && <section key={game.turnSequence} className="turn-change-gate" aria-label="手番の案内">
+      <TurnAnnouncement key={game.turnSequence} player={{ playerName: current.name, isLocal: own }} pulse />
+      {own && <button type="button" className="turn-change-skip" onClick={() => game && setAnnouncedTurnSequence(game.turnSequence)}>演出をスキップ</button>}
+    </section>}
     <div className="table-layout">
       <div className="game-board">
         {waitingForBoard
@@ -216,15 +237,18 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
               disabled={!canAct || !game.remaining.length || (!game.placedThisRoll && !devReroll)} onClick={() => connection.roll('reroll')}>REROLL</button>
             <button type="button" id="end-turn" className="quiet"
               disabled={!canAct || (game.hasLegalPlacement && !game.placedThisRoll)}
-              onClick={() => connection.send({ type: 'end-turn', revision: game.revision })}>END TURN</button>
+              onClick={() => connection.send({ type: 'end-turn', revision: game.revision, turnSequence: game.turnSequence })}>END TURN</button>
           </div> : <button type="button" id="roll-dice" className="gold-button" disabled={!canAct || game?.phase !== 'ready'}
             onClick={() => connection.roll('roll')}>ROLL DICE</button>}
         </div>
         <p className="turn-note">
-          {info.match?.result ? info.match.result.status === 'won' ? '対戦結果が確定しました。' : 'ラウンドが完成しました。'
+          {game?.turnNotice === 'no-legal-placement' ? '置けるマスがありません。手番を交代しました。'
+            : info.match?.result ? info.match.result.status === 'won' ? '対戦結果が確定しました。' : 'ラウンドが完成しました。'
             : info.status !== 'online' ? 'ルームに接続しています。'
             : !own ? '手番のプレイヤーの操作を待っています。'
+            : !turnGateReady ? '手番の案内を表示しています。'
             : inPlacement && game?.hasLegalPlacement ? '出目を選び、行の左端の空きマスに置きます。'
+            : inPlacement && game?.placedThisRoll && game.remaining.length ? '置けるマスがなくても、未配置ダイスを振り直すか手番を終了できます。'
             : inPlacement && devReroll ? '開発モードでは配置前の振り直しも試せます。'
             : inPlacement ? '置けるダイスがなければ、手番を終了します。'
             : 'カップを傾けてダイスを振ります。'}
@@ -239,7 +263,8 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
         </div>
       </aside>
     </div>
-    <MatchPanel room={connection.room} match={info.match} turnId={game?.turnId ?? null} playerId={info.playerId} revision={game?.revision ?? 0} />
+    <MatchPanel room={connection.room} match={info.match} turnId={game?.turnId ?? null} playerId={info.playerId}
+      turnSequence={game?.turnSequence ?? 0} />
     {!info.tray && perf}
     <TrayDialog info={info} setFps={setFps} onClose={confirm} focusTarget={focusTarget} stream={connection.frames} onCup={cupSound}>{info.tray && perf}</TrayDialog>
   </main>;

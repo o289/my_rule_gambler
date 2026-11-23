@@ -69,6 +69,10 @@ body:has(.tray-dialog[open]) { overflow: hidden; }
 .salon-title h1, .turn-heading h2, .retained h3 { margin: 0; color: var(--salon-pale); }
 .salon-title h1 { font: 600 clamp(1.55rem, 3.1vw, 2.66rem)/1.30 var(--serif); letter-spacing: .055em; }
 .salon-title > span { color: var(--salon-muted); font-size: .85rem; }
+.turn-change-gate { display: flex; align-items: center; gap: 9px; margin: 8px 0; }
+.turn-change-gate .turn-announcement { flex: 1; }
+.turn-change-skip { min-height: 42px; padding: 8px 12px; border: 1px solid #9f784d; border-radius: 5px; color: #f0d6b4; background: #21150f; }
+.turn-notice { margin: 0; color: #ffdb9d; font-weight: 700; }
 
 .table-layout {
   display: grid;

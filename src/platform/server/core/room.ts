@@ -10,6 +10,8 @@ import {
   createDiceRollRequest,
   confirmRoll,
   endTurnStatus,
+  finishTurnAfterNoLegalPlacement,
+  finishTurnAfterPlacement,
   finishRoll,
   finishTurn,
   hasLegalPlacement,
@@ -127,7 +129,8 @@ export class Room {
       if (!participant) return [];
       const matchParticipant = this.matchParticipants?.find(item => item.id === id);
       const hasHandDice = this.mode !== 'standard' || Boolean(matchParticipant?.handDiceIds.length);
-      return [{ id, online: participant.peer !== null && hasHandDice }];
+      return [{ id, online: participant.peer !== null && hasHandDice,
+        ...(this.mode === 'standard' ? { hasDice: hasHandDice } : {}) }];
     });
   }
 
@@ -143,6 +146,8 @@ export class Room {
     return {
       seats,
       turnId: this.game.turnId,
+      turnSequence: this.game.turnSequence,
+      turnNotice: this.game.turnNotice,
       phase: this.game.phase,
       revision: this.game.revision,
       config: this.game.config,
@@ -399,7 +404,9 @@ export class Room {
       if (this.rollView.confirmed) return;
       const next = confirmRoll(this.game, participant.id, message.rollId, this.rollView.results);
       if (!next) return;
-      this.game = next;
+      this.game = this.mode === 'standard' && !hasLegalPlacement(this.boardDefinition, next)
+        ? finishTurnAfterNoLegalPlacement(next, this.dicePlayers(), participant.id)
+        : next;
       this.rollView = { ...this.rollView, confirmed: true };
       this.publish();
       return;
@@ -421,6 +428,10 @@ export class Room {
         return;
       case 'roll':
       case 'reroll': {
+        if (this.mode === 'standard' && message.turnSequence !== this.game.turnSequence) {
+          this.sendDiceError(peer, 'TURN', '手番が更新されました。最新の案内を確認してください。');
+          return;
+        }
         const kind = message.type === 'roll' ? 'initial' : 'reroll';
         if (kind === 'initial' && this.mode === 'standard'
           && !this.matchParticipants?.find(item => item.id === participant.id)?.handDiceIds.length) {
@@ -488,17 +499,22 @@ export class Room {
             matchParticipant.handDiceIds = matchParticipant.handDiceIds.filter(id => id !== message.dieId);
           }
         }
+        if (this.mode === 'standard' && result.status === 'placed'
+          && result.state.remaining.length === 0 && !this.matchResult) {
+          this.game = finishTurnAfterPlacement(this.game, this.dicePlayers(), participant.id);
+        }
         this.publish();
         return;
       }
       case 'end-turn': {
+        if (this.mode === 'standard' && message.turnSequence !== this.game.turnSequence) return;
         const status = endTurnStatus(this.game, this.boardDefinition, message.revision);
         if (status === 'ignored') return;
         if (status === 'place-first') {
           this.sendDiceError(peer, 'PLACE_FIRST', '置けるダイスがあるときは1個以上配置してください。');
           return;
         }
-        this.game = finishTurn(this.game, this.dicePlayers(), participant.id);
+        this.game = finishTurn(this.game, this.dicePlayers(), participant.id, this.mode === 'standard');
         this.publish();
         return;
       }
@@ -523,7 +539,7 @@ export class Room {
       metrics: metrics => this.broadcastMetrics(metrics),
       finished: (frame, results, nudges, deadline) => this.finishRoll(rollId, frame, results, nudges, deadline),
     });
-    this.game = started.state;
+    this.game = { ...started.state, turnNotice: kind === 'initial' ? null : this.game.turnNotice };
     this.rollSession = session;
     this.rollView = {
       id: rollId, kind, config, previous, latest: session.initialFrame,

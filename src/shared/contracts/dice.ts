@@ -48,6 +48,8 @@ export interface Placement { row: number; column: number; gem: GemId; dieId?: st
 export interface GameState {
   seats: readonly Seat[];
   turnId: string | null;
+  turnSequence: number;
+  turnNotice: 'no-legal-placement' | null;
   phase: 'ready' | 'rolling' | 'confirm' | 'placement';
   revision: number;
   config: RollConfig;
@@ -102,11 +104,11 @@ export interface Metrics {
 
 export type ClientMessage =
   | { type: 'join'; room: string; token?: string; dev?: boolean }
-  | { type: 'roll' | 'reroll'; requestId: string }
+  | { type: 'roll' | 'reroll'; requestId: string; turnSequence?: number }
   | { type: 'confirm'; rollId: string }
   | { type: 'config'; config: RollConfig }
   | { type: 'place'; rollId: string; dieId: string; row: number; column?: number; revision?: number }
-  | { type: 'end-turn'; revision: number };
+  | { type: 'end-turn'; revision: number; turnSequence?: number };
 
 export type ServerMessage =
   | { type: 'welcome'; playerId: string; token: string; dev: boolean; view: boolean; state: GameState; roll: RollView | null; match?: MatchSetup }
@@ -148,7 +150,8 @@ export function readClientMessage(value: unknown): ClientMessage | null {
     }
     case 'roll':
     case 'reroll':
-      return id(value.requestId) ? { type: value.type, requestId: value.requestId } : null;
+      return id(value.requestId) && (value.turnSequence === undefined || int(value.turnSequence))
+        ? { type: value.type, requestId: value.requestId, turnSequence: value.turnSequence } : null;
     case 'confirm':
       return id(value.rollId) ? { type: 'confirm', rollId: value.rollId } : null;
     case 'config':
@@ -159,7 +162,8 @@ export function readClientMessage(value: unknown): ClientMessage | null {
         && (value.revision === undefined || int(value.revision))
         ? { type: 'place', rollId: value.rollId, dieId: value.dieId, row: value.row, column: value.column, revision: value.revision } : null;
     case 'end-turn':
-      return int(value.revision) ? { type: 'end-turn', revision: value.revision } : null;
+      return int(value.revision) && (value.turnSequence === undefined || int(value.turnSequence))
+        ? { type: 'end-turn', revision: value.revision, turnSequence: value.turnSequence } : null;
     default:
       return null;
   }
@@ -207,6 +211,7 @@ function placement(value: unknown): value is Placement {
 }
 function gameState(value: unknown): value is GameState {
   return record(value) && listOf(value.seats, seat, 6) && (value.turnId === null || id(value.turnId))
+    && int(value.turnSequence) && (value.turnNotice === null || value.turnNotice === 'no-legal-placement')
     && ['ready', 'rolling', 'confirm', 'placement'].some(phase => phase === value.phase)
     && int(value.revision) && config(value.config)
     && (value.boardSeed === undefined || int(value.boardSeed, 0, 0xffff_ffff))

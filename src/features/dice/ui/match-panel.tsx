@@ -6,6 +6,7 @@ import { PlayerInfoModal } from '../../players/ui/player-modal';
 import { VIPPlayersButton } from '../../players/ui/main';
 import { PlayerTray } from '../../bank/ui/tray';
 import { Vault } from '../../bank/ui/vault';
+import { CurrentTurnHighlight } from '../../players/ui/turn-highlight';
 import type { BankSnapshot } from '../../bank/application/bank-player';
 import type { Coin } from '../../bank/model/bank-model';
 import '../../players/ui/style.css';
@@ -34,12 +35,12 @@ function traySnapshot(wallet: readonly Coin[], balance: number): Pick<BankSnapsh
   return { mode: 'withdraw', balance, wallet, run: null, compression: null };
 }
 
-export function MatchPanel({ room, match, turnId, playerId, revision }: {
+export function MatchPanel({ room, match, turnId, playerId, turnSequence }: {
   room: string;
   match: MatchSetup | null;
   turnId: string | null;
   playerId: string | null;
-  revision: number;
+  turnSequence: number;
 }) {
   const opener = useRef<HTMLButtonElement>(null);
   const modal = useRef<PlayerModalHandle>(null);
@@ -50,8 +51,8 @@ export function MatchPanel({ room, match, turnId, playerId, revision }: {
     players,
     currentTurnId: turnId ?? '',
     youId: playerId ?? '',
-    turnVersion: revision,
-  }), [players, turnId, playerId, revision]);
+    turnVersion: turnSequence,
+  }), [players, turnId, playerId, turnSequence]);
 
   if (!match) return null;
   return <section className="match-initial-state" aria-label="対戦の初期状態">
@@ -68,8 +69,10 @@ export function MatchPanel({ room, match, turnId, playerId, revision }: {
       <div className="match-vault bank-stage" aria-label="銀行の金庫"><Vault run={null} /></div>
     </div>
     <div className="match-wallets" aria-label="プレイヤー別の金貨トレー">
-      {match.players.map((player, index) => <PlayerTray key={player.id}
-        snapshot={traySnapshot(wallets[index] ?? [], player.score)} playerName={player.name} />)}
+      {match.players.map((player, index) => <div key={player.id} className="match-wallet-player">
+        {player.id === turnId && <CurrentTurnHighlight key={turnSequence} once />}
+        <PlayerTray snapshot={traySnapshot(wallets[index] ?? [], player.score)} playerName={player.name} />
+      </div>)}
     </div>
     <p className="match-dice-pool">未使用ダイス：{match.unusedDiceCount}個</p>
     <PlayerInfoModal ref={modal} snapshot={snapshot} opener={opener} onVisibilityChange={setOpen} />
