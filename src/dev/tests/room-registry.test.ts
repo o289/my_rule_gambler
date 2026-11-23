@@ -97,6 +97,18 @@ test('one registry Room carries the frozen lobby seats into the dice connection'
     room.commandDice(firstId, dice[0]!, place);
     const placed = [...dice[0]!.messages].reverse().find(message => message.type === 'state' && message.state.placements.length > 0);
     assert.ok(placed?.type === 'state');
+    const settlementMessages = dice.map(peer => peer.messages.filter(message => message.type === 'state' && message.settlement));
+    assert.deepEqual(settlementMessages.map(messages => messages.length), [1, 1], 'all online players receive one transient settlement event');
+    const scoreEvent = settlementMessages[0]?.[0];
+    assert.ok(scoreEvent?.type === 'state' && scoreEvent.settlement);
+    if (scoreEvent?.type === 'state' && scoreEvent.settlement) {
+      assert.equal(scoreEvent.settlement.points, -10, 'the event carries the actual paid amount');
+      assert.equal(scoreEvent.settlement.rowPoints, scoredRow.score);
+      assert.equal(scoreEvent.settlement.revision, scoreEvent.state.revision);
+      assert.deepEqual(scoreEvent.settlement.beforeRanks.map(player => player.rank), [1, 1]);
+      assert.deepEqual(scoreEvent.settlement.afterRanks.map(player => player.rank), [2, 1]);
+      assert.equal(scoreEvent.settlement.gameEnded, false);
+    }
     if (placed?.type === 'state') {
       assert.equal(placed.match?.players[0]?.score, 70, 'the negative goal charges only ten points once');
       assert.deepEqual(placed.match?.players[0]?.wallet, [{ denomination: 50, count: 1 }, { denomination: 10, count: 2 }]);
@@ -105,12 +117,15 @@ test('one registry Room carries the frozen lobby seats into the dice connection'
       const afterDuplicate = [...dice[0]!.messages].reverse().find(message => message.type === 'state');
       assert.ok(afterDuplicate?.type === 'state');
       assert.equal(afterDuplicate.match?.players[0]?.score, 70, 'a stale duplicate placement cannot settle twice');
+      assert.equal(dice[0]!.messages.filter(message => message.type === 'state' && message.settlement).length, 1,
+        'a stale duplicate placement does not emit or replay another settlement');
     }
     const replacement = new DiceGuest();
     room.connectDice(replacement, { token: lobby[0]!.welcome.token });
     const resumed = replacement.messages.find(message => message.type === 'welcome');
     assert.ok(resumed?.type === 'welcome');
     if (resumed?.type === 'welcome' && placed?.type === 'state') {
+      assert.equal('settlement' in resumed, false, 'reconnect welcome sends a baseline without replaying the prior effect');
       assert.deepEqual(resumed.state.placements, placed.state.placements);
       assert.equal(resumed.state.revision, placed.state.revision);
       assert.equal(resumed.state.turnId, placed.state.turnId);

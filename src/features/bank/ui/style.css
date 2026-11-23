@@ -496,6 +496,15 @@ button:disabled { cursor: default; }
   pointer-events: none;
 }
 
+.tray-flight-anchors {
+  position: absolute;
+  inset: var(--tray-padding);
+  z-index: 1;
+  opacity: 0;
+  pointer-events: none;
+}
+.tray-flight-anchors .tray-inset { position: absolute; inset: 0; }
+
 .empty-wallet { align-self: center; color: #cca67e; text-align: center; font-size: .78rem; }
 
 .coin-group {

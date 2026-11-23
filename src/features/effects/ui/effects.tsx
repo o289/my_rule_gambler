@@ -3,7 +3,7 @@ import type { RefObject } from 'react';
 import { GEMS } from '../../board/model/gems';
 import { requiredGemAt } from '../../board/model/board-model';
 import { BoardScene, ConvergingLights, GemFlight, locateCell } from './board-scene';
-import { rankOrder, scoreLabel, turnLabel } from '../model/effect-model';
+import { rankEntries, scoreLabel, turnLabel } from '../model/effect-model';
 import type { EffectKind, EffectParams, EffectRequest, EffectScenario } from '../model/effect-model';
 import { TurnScene } from './turn-scene';
 import { TurnChangeEffect } from './settlement-scenes';
@@ -59,9 +59,13 @@ function BoardScoreEffect({ playback, params, scenario }: ScenarioSceneProps & {
     scoreNotice={{ rowId: target.rowId, label: scoreLabel(points) }} />;
 }
 
-export function BigWinEffect({ playback, params, stage, scenario }: ScenarioSceneProps & { params: EffectParams['BIG_WIN'] }) {
+export function BigWinEffect({ playback, params, stage, scenario, liveBoard }: SharedSceneProps & {
+  scenario: Pick<EffectScenario, 'board' | 'featuredCell'>;
+  params: EffectParams['BIG_WIN']; liveBoard?: RefObject<HTMLElement | null>;
+}) {
   const target = params.target ?? scenario.featuredCell;
   const board = useRef<HTMLElement>(null);
+  const targetBoard = liveBoard ?? board;
   const [focusPoint, setFocusPoint] = useState<Point>();
   const gem = scenario.board.columns.find(column => column.id === target.columnId)?.gem ?? 'amethyst';
   const impact = reached(playback, 'impact');
@@ -69,15 +73,17 @@ export function BigWinEffect({ playback, params, stage, scenario }: ScenarioScen
   const focused = reached(playback, 'focus');
   useScreenShake(stage, active && impact);
   useLayoutEffect(() => {
-    const cell = locateCell(board.current, target);
+    const cell = locateCell(targetBoard.current, target);
     if (cell && stage.current && focused) setFocusPoint(centerWithin(cell, stage.current));
-  }, [stage, target, focused]);
+    if (liveBoard && cell && playback.phase !== 'start') cell.dataset.fxTarget = 'gold';
+    return () => { if (liveBoard && cell?.dataset.fxTarget === 'gold') delete cell.dataset.fxTarget; };
+  }, [stage, target, focused, liveBoard, playback.phase]);
   return (
     <>
-      <BoardScene viewportRef={board} definition={scenario.board} target={target} placed={gem} tone={playback.phase === 'start' ? undefined : 'gold'} />
+      {!liveBoard && <BoardScene viewportRef={board} definition={scenario.board} target={target} placed={gem} tone={playback.phase === 'start' ? undefined : 'gold'} />}
       <div className="big-vignette" aria-hidden="true" />
       {!impact && <div className="big-charge" data-phase={playback.phase} style={focusPoint ? { left: focusPoint.x, top: focusPoint.y } : undefined} aria-hidden="true" />}
-      {active && focusPoint && reached(playback, 'gather') && !reached(playback, 'silence') && <ConvergingLights stage={stage} board={board} target={focusPoint} />}
+      {active && focusPoint && reached(playback, 'gather') && !reached(playback, 'silence') && <ConvergingLights stage={stage} board={targetBoard} target={focusPoint} />}
       {impact && (
         <div className="win-slate" data-animate={active} data-complete={!playback.playing}>
           <div className="win-halo" aria-hidden="true" />
@@ -106,7 +112,7 @@ function Lightning() {
 function Ranking({ params, after, highlight, reduced }: { params: EffectParams['COMEBACK']; after: boolean; highlight: boolean; reduced: boolean }) {
   const list = useRef<HTMLOListElement>(null);
   const previous = useRef(new Map<string, number>());
-  const order = useMemo(() => rankOrder(params, after), [params, after]);
+  const order = useMemo(() => rankEntries(params, after), [params, after]);
   useLayoutEffect(() => {
     if (!list.current) return;
     const next = new Map<string, number>();
@@ -130,15 +136,16 @@ function Ranking({ params, after, highlight, reduced }: { params: EffectParams['
 
   return (
     <ol className="leaderboard" ref={list} aria-label="順位表">
-      {order.map((name, index) => (
-        <li key={name} data-player={name} data-rank={index + 1} data-contender={name === params.playerName} data-winner={name === params.playerName && highlight}>
-          <span className="rank-number">{index + 1}<span className="sr-only">位</span></span>
+      {order.map(({ id, name, rank }) => {
+        const isTarget = params.playerId ? id === params.playerId : name === params.playerName;
+        return <li key={id} data-player={id} data-rank={rank} data-contender={isTarget} data-winner={isTarget && highlight}>
+          <span className="rank-number">{rank}<span className="sr-only">位</span></span>
           <span className="rank-name">{name}</span>
-          {after && name === params.playerName && <span className="rank-change" data-down={params.toRank > params.fromRank}>
+          {after && isTarget && <span className="rank-change" data-down={params.toRank > params.fromRank}>
             {params.toRank > params.fromRank ? '↓' : '↑'} {Math.abs(params.fromRank - params.toRank)}
           </span>}
-        </li>
-      ))}
+        </li>;
+      })}
     </ol>
   );
 }
@@ -202,12 +209,14 @@ export function JackpotVictoryEffect({ playback, params, stage, scenario }: Scen
   );
 }
 
-export function EffectScene({ playback, stage, scenario, settleRoll }: ScenarioSceneProps & { settleRoll: (id: number) => void }) {
+export function EffectScene({ playback, stage, scenario, settleRoll, liveBoard }: ScenarioSceneProps & {
+  settleRoll: (id: number) => void; liveBoard?: RefObject<HTMLElement | null>;
+}) {
   const { request } = playback;
   switch (request.kind) {
     case 'GEM_PLACEMENT': return <GemPlacementEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
     case 'BOARD_SCORE': return <BoardScoreEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
-    case 'BIG_WIN': return <BigWinEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
+    case 'BIG_WIN': return <BigWinEffect playback={playback} params={request.params} stage={stage} scenario={scenario} liveBoard={liveBoard} />;
     case 'ONE_CELL_COMEBACK': {
       const ranking = request.params.gem === scenario.turn.comebackGem && reached(playback, 'comeback');
       return <>

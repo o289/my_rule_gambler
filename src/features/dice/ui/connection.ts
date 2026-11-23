@@ -1,7 +1,9 @@
 import { parseJson, readServerMessage, roomName } from '../../../shared/contracts/dice';
-import type { ClientMessage, Frame, GameState, Impact, MatchSetup, Metrics, RollView, ServerMessage } from '../../../shared/contracts/dice';
+import type { ClientMessage, Frame, GameState, Impact, MatchSetup, MatchSettlementEvent, Metrics, RollView, ServerMessage } from '../../../shared/contracts/dice';
 import { confirmedPlacement } from '../model/placement-feedback';
 import type { PlacementFeedback } from '../model/placement-feedback';
+import { SettlementEventQueue } from '../model/settlement-event-queue';
+import { acceptsGameState } from '../model/state-sync';
 
 interface Sample { frame: Frame; arrived: number }
 
@@ -46,6 +48,7 @@ export interface ConnectionView {
   dev: boolean;
   game: GameState | null;
   match: MatchSetup | null;
+  settlements: readonly MatchSettlementEvent[];
   roll: RollView | null;
   tray: string | null;
   problem: string;
@@ -55,7 +58,7 @@ export interface ConnectionView {
 }
 
 const HOLD: ConnectionView = {
-  status: 'connecting', playerId: null, dev: false, game: null, match: null, roll: null, tray: null,
+  status: 'connecting', playerId: null, dev: false, game: null, match: null, settlements: [], roll: null, tray: null,
   problem: '', metrics: null, pending: false, placement: null,
 };
 
@@ -70,6 +73,7 @@ export class DiceConnection {
   private token: string | undefined;
   private listeners = new Set<() => void>();
   private impactListeners = new Set<(hits: readonly Impact[]) => void>();
+  private settlementQueue = new SettlementEventQueue();
   private readonly key: string;
 
   constructor(private readonly development: boolean, room: string, initialToken?: string) {
@@ -88,6 +92,11 @@ export class DiceConnection {
     this.impactListeners.add(listener);
     return () => { this.impactListeners.delete(listener); };
   };
+
+  completeSettlement(event: MatchSettlementEvent) {
+    if (!this.settlementQueue.complete(event)) return;
+    this.update({ settlements: this.settlementQueue.getSnapshot() });
+  }
 
   private update(patch: Partial<ConnectionView>) {
     this.current = { ...this.current, ...patch };
@@ -141,24 +150,33 @@ export class DiceConnection {
         try { sessionStorage.setItem(this.key, message.token); }
         catch { this.update({ problem: 'このタブを開いたまま再接続できます。' }); }
         if (message.roll) this.frames.push(message.roll.latest);
+        this.settlementQueue.clearPending();
         this.update({
           status: 'online', playerId: message.playerId, game: message.state, roll: message.roll,
-          dev: message.dev, match: message.match ?? null, tray: message.view ? message.roll?.id ?? null : null,
+          dev: message.dev, match: message.match ?? null, settlements: this.settlementQueue.getSnapshot(), tray: message.view ? message.roll?.id ?? null : null,
           pending: false, problem: '', placement: null,
         });
         break;
       case 'state': {
+        if (!acceptsGameState(this.current.game, message.state)) return;
         const newRoll = message.roll?.id !== this.current.roll?.id;
         const nextMatch = message.match ?? this.current.match;
         const newTurn = nextMatch !== null && this.current.game !== null
           && message.state.turnSequence !== this.current.game.turnSequence;
+        let settlements = this.current.settlements;
+        if (message.settlement && nextMatch && this.current.match && message.state.boardSeed !== undefined
+          && message.settlement.boardSeed === message.state.boardSeed
+          && message.settlement.revision === message.state.revision) {
+          this.settlementQueue.enqueue(message.settlement);
+          settlements = this.settlementQueue.getSnapshot();
+        }
         if (message.roll) this.frames.push(message.roll.latest);
         this.update({
-          game: message.state, match: nextMatch, roll: message.roll, pending: false,
+          game: message.state, match: nextMatch, settlements, roll: message.roll, pending: false,
           placement: this.current.game?.boardSeed === message.state.boardSeed
             ? confirmedPlacement(this.current.game, message.state) ?? this.current.placement
             : null,
-          tray: newTurn ? null : newRoll ? message.roll?.id ?? null : this.current.tray,
+          tray: message.settlement ? null : newTurn ? null : newRoll ? message.roll?.id ?? null : this.current.tray,
           metrics: newRoll ? null : this.current.metrics,
           problem: '',
         });

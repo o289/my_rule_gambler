@@ -1,7 +1,8 @@
 import { COUNTDOWN_MS, MAX_PLAYERS } from '../../../shared/contracts/casino-entry';
 import type { CasinoRoomInfo, LobbyState, ServerMessage as LobbyMessage } from '../../../shared/contracts/casino-entry';
-import type { ClientMessage as DiceClientMessage, DiceResult, Frame, GameState, MatchPlayerSetup, MatchSetup, RollKind, RollView, ServerMessage as DiceMessage } from '../../../shared/contracts/dice';
+import type { ClientMessage as DiceClientMessage, DiceResult, Frame, GameState, MatchPlayerSetup, MatchSetup, MatchSettlementEvent, RollKind, RollView, ServerMessage as DiceMessage } from '../../../shared/contracts/dice';
 import { createGoalBoard } from '../../../features/board/model/goal-layout';
+import { goalColumn } from '../../../features/board/model/board-model';
 import type { BoardDefinition } from '../../../features/board/model/board-model';
 import { rankPlayers } from '../../../features/players/model/player-data';
 import {
@@ -205,14 +206,15 @@ export class Room {
     this.unusedDiceIds = ids.slice(assignedDiceCount);
   }
 
-  private publish() {
+  private publish(settlement?: MatchSettlementEvent) {
     const lobbyState = this.lobbyState();
     const diceState = this.gameState();
     for (const participant of this.participants) {
       const peer = participant.peer;
       if (!peer) continue;
       if (peer.protocol === 'lobby') peer.send({ type: 'state', state: lobbyState });
-      else if (diceState) peer.send({ type: 'state', state: diceState, roll: this.rollView, match: this.matchState() });
+      else if (diceState) peer.send({ type: 'state', state: diceState, roll: this.rollView, match: this.matchState(),
+        ...(settlement ? { settlement } : {}) });
     }
   }
 
@@ -472,6 +474,7 @@ export class Room {
           return;
         }
         let settlement: ReturnType<typeof settleCompletedRows> | null = null;
+        let scoreEvent: MatchSettlementEvent | undefined;
         if (result.status === 'placed' && matchParticipant && this.mode === 'standard') {
           const rowId = this.boardDefinition.rows[message.row]?.id;
           if (!rowId || !this.matchParticipants) return;
@@ -480,6 +483,34 @@ export class Room {
             completedRows: this.completedRows,
             result: this.matchResult,
           }, participant.id, rowId);
+          const row = this.boardDefinition.rows.find(item => item.id === rowId);
+          const goal = row ? goalColumn(this.boardDefinition, row) : undefined;
+          const beforeCompleted = this.completedRows.includes(rowId);
+          const afterCompleted = settlement.completedRows.includes(rowId);
+          const settledPlayer = settlement.players.find(item => item.id === participant.id);
+          if (!beforeCompleted && afterCompleted && row && goal && settledPlayer) {
+            const beforeRanks = rankPlayers(this.matchParticipants);
+            const afterRanks = rankPlayers(settlement.players);
+            const seatById = new Map(this.lobby.startedPlayers?.map(seat => [seat.id, seat]) ?? []);
+            const makeRanks = (ranks: ReadonlyMap<string, number>) => this.matchParticipants?.flatMap(item => {
+              const seat = seatById.get(item.id);
+              const rank = ranks.get(item.id);
+              return seat && rank !== undefined ? [{ id: item.id, name: seat.name, rank }] : [];
+            }) ?? [];
+            scoreEvent = {
+              boardSeed: this.boardSeed ?? 0,
+              revision: result.state.revision,
+              playerId: participant.id,
+              playerName: seatById.get(participant.id)?.name ?? participant.name,
+              rowId,
+              columnId: goal.id,
+              rowPoints: row.score,
+              points: settledPlayer.score - matchParticipant.score,
+              gameEnded: settlement.result?.status === 'won',
+              beforeRanks: makeRanks(beforeRanks),
+              afterRanks: makeRanks(afterRanks),
+            };
+          }
         }
         this.game = result.state;
         if (result.status === 'placed' && matchParticipant) {
@@ -503,7 +534,7 @@ export class Room {
           && result.state.remaining.length === 0 && !this.matchResult) {
           this.game = finishTurnAfterPlacement(this.game, this.dicePlayers(), participant.id);
         }
-        this.publish();
+        this.publish(scoreEvent);
         return;
       }
       case 'end-turn': {

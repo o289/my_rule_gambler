@@ -62,7 +62,12 @@ function CoinGroups({ wallet, renderCoin }: { wallet: readonly Coin[]; renderCoi
   );
 }
 
-export function PlayerTray({ snapshot, playerName }: { snapshot: Pick<BankSnapshot, 'mode' | 'balance' | 'wallet' | 'run' | 'compression'>; playerName: string }) {
+export function PlayerTray({ snapshot, playerName, flightSources = [], flightTargets = [] }: {
+  snapshot: Pick<BankSnapshot, 'mode' | 'balance' | 'wallet' | 'run' | 'compression'>;
+  playerName: string;
+  flightSources?: readonly Coin[];
+  flightTargets?: readonly Coin[];
+}) {
   const tray = useRef<HTMLDivElement>(null);
   const { wallet, balance, run, mode, compression } = snapshot;
   const deposit = mode === 'deposit';
@@ -98,7 +103,8 @@ export function PlayerTray({ snapshot, playerName }: { snapshot: Pick<BankSnapsh
           const merging = gatheringIds.has(coin.id);
           const justMinted = minted === coin.id;
           return (
-            <div className="coin-anchor" data-coin-id={coin.id} data-coin-value={coin.value} data-in-flight={flying} data-chosen={chosen} data-lifted={lifted} data-landed={landed} data-merge={merging} data-merge-hidden={merging && animateMerge}
+            <div className="coin-anchor" data-coin-id={coin.id} data-coin-value={coin.value}
+              data-in-flight={flying} data-chosen={chosen} data-lifted={lifted} data-landed={landed} data-merge={merging} data-merge-hidden={merging && animateMerge}
               data-minted={justMinted} key={coin.id}>
               <span className="coin-in-tray"><GoldCoin coin={coin} /></span>
               {(landed || justMinted) && <i className="tray-receipt" />}
@@ -118,6 +124,13 @@ export function PlayerTray({ snapshot, playerName }: { snapshot: Pick<BankSnapsh
           );
         })}
         {gathering && animateMerge && <CoinMerger key={gathering.output.id} tray={tray} step={gathering} />}
+        {(flightSources.length > 0 || flightTargets.length > 0) && <div className="tray-flight-anchors" aria-hidden="true">
+          <CoinGroups wallet={[...flightSources, ...flightTargets]} renderCoin={coin => <div className="coin-anchor"
+            data-coin-id={flightSources.some(source => source.id === coin.id) ? coin.id : undefined}
+            data-flight-target={flightTargets.some(target => target.id === coin.id) ? coin.id : undefined} key={coin.id}>
+            <span className="coin-in-tray"><GoldCoin coin={coin} /></span>
+          </div>} />
+        </div>}
       </div>
     </section>
   );

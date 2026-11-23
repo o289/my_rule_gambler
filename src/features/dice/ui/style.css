@@ -73,6 +73,7 @@ body:has(.tray-dialog[open]) { overflow: hidden; }
 .turn-change-gate .turn-announcement { flex: 1; }
 .turn-change-skip { min-height: 42px; padding: 8px 12px; border: 1px solid #9f784d; border-radius: 5px; color: #f0d6b4; background: #21150f; }
 .turn-notice { margin: 0; color: #ffdb9d; font-weight: 700; }
+.comeback-hint { margin: 10px 0 0; color: #ffdf9e; font-size: .84rem; font-weight: 700; }
 
 .table-layout {
   display: grid;
@@ -81,6 +82,19 @@ body:has(.tray-dialog[open]) { overflow: hidden; }
   gap: clamp(12px, 2vw, 25px);
 }
 .game-board { min-width: 0; }
+.settlement-stage { position: relative; }
+.live-effects-layer {
+  position: fixed; z-index: 100; inset: 0; display: grid; place-items: center;
+  background: #100b08a6; backdrop-filter: blur(2px);
+}
+.live-effect-stage { width: min(100vw, 1170px); height: 100svh; min-height: 0; background: transparent; }
+.live-effect-stage .stage-surface { opacity: .24; }
+.live-effect-skip, .settlement-score-skip {
+  min-height: 40px; padding: 7px 12px; border: 1px solid #bd9561; border-radius: 5px;
+  color: #fff0d5; background: #1b120ee8; font-weight: 700;
+}
+.live-effect-skip { position: absolute; z-index: 25; right: 14px; bottom: 14px; }
+.settlement-score-skip { position: absolute; z-index: 25; right: 12px; top: 12px; }
 .board-loading {
   display: grid;
   place-items: center;

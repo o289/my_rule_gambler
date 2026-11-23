@@ -5,13 +5,22 @@ import type { BoardDefinition, CellAddress } from '../../board/model/board-model
 import { canSelect, formatScore, goalColumn, playableColumns } from '../../board/model/board-model';
 import { REDUCED_SCORE_MS, scoreTimings } from '../ui/board-score/board-motion';
 
+const idPattern = /^[A-Za-z0-9_-]{1,80}$/;
+
 export interface EffectParams {
   GEM_PLACEMENT: { gem: GemId; target: CellAddress };
   BOARD_SCORE: { playerName: string; points: number; target: CellAddress };
   BIG_WIN: { playerName: string; points: number; target?: CellAddress };
   ONE_CELL_COMEBACK: { gem: GemId };
   TURN_CHANGE: { playerName: string; isLocal: boolean };
-  COMEBACK: { playerName: string; opponents: readonly string[]; fromRank: number; toRank: number };
+  COMEBACK: {
+    playerName: string;
+    opponents: readonly string[];
+    fromRank: number;
+    toRank: number;
+    playerId?: string;
+    ranking?: readonly { id: string; name: string; fromRank: number; toRank: number }[];
+  };
   JACKPOT_VICTORY: { playerName: string; gem: GemId; target?: CellAddress };
 }
 
@@ -143,10 +152,14 @@ export function turnLabel({ playerName, isLocal }: EffectParams['TURN_CHANGE']) 
   return isLocal ? 'あなたの手番' : `${playerName}の手番`;
 }
 
-export function beatsFor(request: EffectRequest, reduced: boolean, scenario: Pick<EffectScenario, 'board' | 'turn'>) {
+export type EffectBeatContext = Pick<EffectScenario, 'board'> & Partial<Pick<EffectScenario, 'turn'>>;
+
+export function beatsFor(request: EffectRequest, reduced: boolean, scenario: EffectBeatContext) {
   switch (request.kind) {
-    case 'ONE_CELL_COMEBACK':
+    case 'ONE_CELL_COMEBACK': {
+      if (!scenario.turn) throw new TypeError('あと1マスで逆転の演出には手番のシナリオが必要です。');
       return oneCellComebackBeats(request.params.gem, reduced, scenario.turn);
+    }
     case 'TURN_CHANGE':
       return reduced ? [{ at: 0, cue: 'start' }, { at: REDUCED_TURN_CHANGE_DURATION_MS, cue: 'finish' }] as const : timeline.TURN_CHANGE;
     case 'BOARD_SCORE': {
@@ -232,11 +245,38 @@ export function readEffect(kind: unknown, params: unknown, context?: EffectTarge
       const playerName = readName(params.playerName);
       if (!Array.isArray(params.opponents) || !params.opponents.length) throw new TypeError('対戦相手を指定してください。');
       const opponents = params.opponents.map(readName);
-      if (new Set([...opponents, playerName]).size !== opponents.length + 1) throw new RangeError('プレイヤー名はそれぞれ異なる名前を指定してください。');
+      if (params.ranking === undefined && new Set([...opponents, playerName]).size !== opponents.length + 1) {
+        throw new RangeError('プレイヤー名はそれぞれ異なる名前を指定してください。');
+      }
       const fromRank = readRank(params.fromRank, opponents.length + 1);
       const toRank = readRank(params.toRank, opponents.length + 1);
       if (toRank === fromRank) throw new RangeError('変動前後で異なる順位を指定してください。');
-      return { kind, params: { playerName, opponents, fromRank, toRank } };
+      const playerId = params.playerId;
+      if (playerId !== undefined && (typeof playerId !== 'string' || !idPattern.test(playerId))) {
+        throw new TypeError('プレイヤー ID を指定してください。');
+      }
+      let ranking: EffectParams['COMEBACK']['ranking'];
+      if (params.ranking !== undefined) {
+        if (!Array.isArray(params.ranking) || params.ranking.length !== opponents.length + 1) {
+          throw new TypeError('前後の順位をプレイヤー全員分指定してください。');
+        }
+        const ids = new Set<string>();
+        ranking = params.ranking.map(value => {
+          if (!isRecord(value) || typeof value.id !== 'string' || !idPattern.test(value.id)
+            || typeof value.name !== 'string' || !value.name.trim()
+            || ids.has(value.id)) throw new TypeError('順位表のプレイヤーを正しく指定してください。');
+          ids.add(value.id);
+          return { id: value.id, name: readName(value.name),
+            fromRank: readRank(value.fromRank, opponents.length + 1), toRank: readRank(value.toRank, opponents.length + 1) };
+        });
+        const changedPlayer = ranking.find(item => item.id === playerId);
+        if (!playerId || !changedPlayer || changedPlayer.name !== playerName
+          || changedPlayer.fromRank !== fromRank || changedPlayer.toRank !== toRank) {
+          throw new RangeError('順位表と対象プレイヤーの順位が一致しません。');
+        }
+      }
+      return { kind, params: { playerName, opponents, fromRank, toRank,
+        ...(playerId === undefined ? {} : { playerId }), ...(ranking === undefined ? {} : { ranking }) } };
     }
     case 'JACKPOT_VICTORY':
       {
@@ -253,4 +293,12 @@ export function rankOrder(params: EffectParams['COMEBACK'], after: boolean) {
   const order = [...params.opponents];
   order.splice(rank - 1, 0, params.playerName);
   return order;
+}
+
+export function rankEntries(params: EffectParams['COMEBACK'], after: boolean) {
+  if (params.ranking) {
+    return params.ranking.map(item => ({ id: item.id, name: item.name, rank: after ? item.toRank : item.fromRank }))
+      .sort((left, right) => left.rank - right.rank);
+  }
+  return rankOrder(params, after).map((name, index) => ({ id: name, name, rank: index + 1 }));
 }

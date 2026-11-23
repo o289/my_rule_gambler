@@ -1,5 +1,5 @@
 import { beatsFor, effectDuration } from '../model/effect-model';
-import type { Beat, Cue, EffectRequest, EffectScenario } from '../model/effect-model';
+import type { Beat, Cue, EffectBeatContext, EffectRequest } from '../model/effect-model';
 
 export interface EffectPlayback {
   readonly id: number;
@@ -48,7 +48,7 @@ export class EffectPlayer {
   private requests: readonly EffectRequest[] = [];
   private nextIndex = 0;
 
-  constructor(private audio: EffectAudio, private scenario: Pick<EffectScenario, 'board' | 'turn'>, private clock = browserClock) {}
+  constructor(private audio: EffectAudio, private scenario: EffectBeatContext, private clock = browserClock) {}
 
   getSnapshot = () => this.playback;
 

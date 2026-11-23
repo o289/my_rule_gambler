@@ -1,4 +1,6 @@
 .match-initial-state {
+  position: relative;
+  isolation: isolate;
   display: grid;
   grid-template-columns: minmax(150px, .38fr) minmax(0, 1fr);
   gap: 10px;

@@ -19,11 +19,12 @@ interface BoardCellProps {
   goalLabel?: string;
   placementId?: number;
   awardId?: number;
+  hinted?: boolean;
   scoreDelay: number;
   onSelect: (cell: CellAddress) => void;
 }
 
-export function BoardCell({ address, label, state, selected, expected, gem, goal, goalLabel, placementId, awardId, scoreDelay, onSelect }: BoardCellProps) {
+export function BoardCell({ address, label, state, selected, expected, gem, goal, goalLabel, placementId, awardId, hinted, scoreDelay, onSelect }: BoardCellProps) {
   const placed = gem !== undefined;
   const blocked = state === 'blocked';
   const displayed = gem ?? expected;
@@ -36,6 +37,7 @@ export function BoardCell({ address, label, state, selected, expected, gem, goal
         className="board-cell"
         data-state={state}
         data-awarded={awardId !== undefined || undefined}
+        data-comeback-hint={hinted || undefined}
         data-row={address.rowId}
         data-column={address.columnId}
         data-goal={goal !== undefined || undefined}
@@ -67,6 +69,7 @@ interface BoardProps {
   onSelect: (cell: CellAddress) => void;
   scoreNotice?: { rowId: string; label: string };
   candidates?: ReadonlySet<string>;
+  hintCell?: CellAddress;
 }
 
 type BoardStyle = CSSProperties & {
@@ -82,7 +85,7 @@ function formatShortState(state: CellState, gem?: GemId) {
   return state === 'available' ? '次に配置できるマス' : '未配置';
 }
 
-export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice, candidates }: BoardProps) {
+export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice, candidates, hintCell }: BoardProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const cabinet = useRef<HTMLDivElement>(null);
   const [isOverflowing, setOverflowing] = useState(false);
@@ -149,6 +152,7 @@ export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice,
                         goalLabel={isGoal && scoreNotice?.rowId === row.id ? scoreNotice.label : undefined}
                         placementId={!blocked && state.placement?.cell === key ? state.placement.id : undefined}
                         awardId={blocked ? undefined : awardId}
+                        hinted={!blocked && hintCell?.rowId === row.id && hintCell.columnId === column.id}
                         scoreDelay={playableIndex * SCORE_STAGGER_MS}
                         onSelect={onSelect}
                       />

@@ -82,6 +82,26 @@ export interface MatchResult {
   readonly winners: readonly string[];
 }
 
+export interface SettlementRank {
+  readonly id: string;
+  readonly name: string;
+  readonly rank: number;
+}
+
+export interface MatchSettlementEvent {
+  readonly boardSeed: number;
+  readonly revision: number;
+  readonly playerId: string;
+  readonly playerName: string;
+  readonly rowId: string;
+  readonly columnId: string;
+  readonly rowPoints: number;
+  readonly points: number;
+  readonly gameEnded: boolean;
+  readonly beforeRanks: readonly SettlementRank[];
+  readonly afterRanks: readonly SettlementRank[];
+}
+
 export interface MatchSetup {
   readonly totalDice: 30;
   readonly unusedDiceCount: number;
@@ -112,7 +132,7 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { type: 'welcome'; playerId: string; token: string; dev: boolean; view: boolean; state: GameState; roll: RollView | null; match?: MatchSetup }
-  | { type: 'state'; state: GameState; roll: RollView | null; match?: MatchSetup }
+  | { type: 'state'; state: GameState; roll: RollView | null; match?: MatchSetup; settlement?: MatchSettlementEvent }
   | { type: 'frame'; frame: Frame }
   | { type: 'metrics'; metrics: Metrics }
   | { type: 'error'; code: string; message: string };
@@ -261,6 +281,40 @@ function matchResult(value: unknown): value is MatchResult {
       || (value.status === 'continue' && value.highestScore < 500 && value.winners.length === 0))
     && new Set(value.winners).size === value.winners.length;
 }
+function settlementRank(value: unknown): value is SettlementRank {
+  return record(value) && id(value.id) && typeof value.name === 'string'
+    && value.name.length > 0 && value.name.length <= 80 && int(value.rank, 1, 6);
+}
+function matchSettlementEvent(value: unknown): value is MatchSettlementEvent {
+  if (!record(value)) return false;
+  const beforeCandidate = value.beforeRanks;
+  const afterCandidate = value.afterRanks;
+  if (!int(value.boardSeed, 0, 0xffff_ffff) || !int(value.revision) || !id(value.playerId)
+    || typeof value.playerName !== 'string' || !value.playerName.length || value.playerName.length > 80
+    || !id(value.rowId) || !id(value.columnId)
+    || typeof value.rowPoints !== 'number' || !Number.isSafeInteger(value.rowPoints) || value.rowPoints % 10 !== 0
+    || typeof value.points !== 'number' || !Number.isSafeInteger(value.points) || value.points % 10 !== 0
+    || typeof value.gameEnded !== 'boolean'
+    || !listOf(beforeCandidate, settlementRank, 6) || !listOf(afterCandidate, settlementRank, 6)) return false;
+  const beforeRanks = beforeCandidate;
+  const afterRanks = afterCandidate;
+  const uniqueRanks = (ranks: readonly SettlementRank[]) => {
+    const ids = new Set(ranks.map(item => item.id));
+    const playerId = value.playerId;
+    return typeof playerId === 'string' && ids.size === ranks.length && ids.has(playerId)
+      && ranks.every(item => item.rank <= ranks.length);
+  };
+  return beforeRanks.length >= 2 && beforeRanks.length === afterRanks.length
+    && uniqueRanks(beforeRanks) && uniqueRanks(afterRanks)
+    && beforeRanks.every(item => afterRanks.some(after => after.id === item.id));
+}
+function settlementMatchesMatch(event: MatchSettlementEvent, match: MatchSetup) {
+  return event.gameEnded === (match.result?.status === 'won')
+    && match.players.some(player => player.id === event.playerId && player.name === event.playerName)
+    && event.afterRanks.length === match.players.length
+    && event.afterRanks.every(rank => match.players.some(player => player.id === rank.id
+      && player.name === rank.name && player.rank === rank.rank));
+}
 function metrics(value: unknown): value is Metrics {
   if (!record(value) || !config(value)) return false;
   return [value.stepsPerSecond, value.sentPerSecond, value.meanStepMs, value.peakStepMs, value.cpuPercent, value.stoppedMs]
@@ -274,7 +328,13 @@ export function readServerMessage(value: unknown): ServerMessage | null {
     case 'state':
       return gameState(value.state) && (value.roll === null || rollView(value.roll))
         && (value.match === undefined || matchSetup(value.match))
-        ? { type: 'state', state: value.state, roll: value.roll, ...(value.match === undefined ? {} : { match: value.match }) } : null;
+        && (value.settlement === undefined || matchSettlementEvent(value.settlement))
+        && (value.settlement === undefined || (value.match !== undefined
+          && value.settlement.boardSeed === value.state.boardSeed
+          && value.settlement.revision === value.state.revision
+          && settlementMatchesMatch(value.settlement, value.match)))
+        ? { type: 'state', state: value.state, roll: value.roll, ...(value.match === undefined ? {} : { match: value.match }),
+          ...(value.settlement === undefined ? {} : { settlement: value.settlement }) } : null;
     case 'welcome':
       return id(value.playerId) && typeof value.token === 'string' && tokenPattern.test(value.token)
         && typeof value.dev === 'boolean' && typeof value.view === 'boolean'
