@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 import { EffectPlayer } from '../../effects/application/effect-player';
-import { BigWinEffect, ComebackEffect } from '../../effects/ui/effects';
+import { BigWinEffect, ComebackEffect, JackpotVictoryEffect } from '../../effects/ui/effects';
 import type { SoundManager } from '../../effects/ui/sound';
 import type { BoardDefinition } from '../../board/model/board-model';
 import type { MatchSettlementEvent } from '../../../shared/contracts/dice';
@@ -42,6 +42,9 @@ export function SettlementOverlay({ event, board, boardRef, audio, onComplete }:
       {playback.request.kind === 'BIG_WIN'
         ? <BigWinEffect key={playback.id} playback={playback} params={playback.request.params} stage={stage}
           scenario={{ board, featuredCell: playback.request.params.target ?? { rowId: event.rowId, columnId: event.columnId } }} liveBoard={boardRef} />
+        : playback.request.kind === 'JACKPOT_VICTORY'
+          ? <JackpotVictoryEffect key={playback.id} playback={playback} params={playback.request.params} stage={stage}
+            scenario={{ board, featuredCell: playback.request.params.target ?? { rowId: event.rowId, columnId: event.columnId } }} liveBoard={boardRef} />
         : playback.request.kind === 'COMEBACK'
           ? <ComebackEffect key={playback.id} playback={playback} params={playback.request.params} stage={stage} />
           : null}

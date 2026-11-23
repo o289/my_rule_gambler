@@ -154,6 +154,8 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const [announcedTurnSequence, setAnnouncedTurnSequence] = useState<number | null>(null);
   const current = game?.seats.find(item => item.id === game.turnId);
   const settlement = info.settlements[0];
+  const finalResult = info.match?.result?.status === 'won' ? info.match.result : null;
+  const showFinalResults = Boolean(hasStandardMatch && finalResult && !settlement);
   const settlementKey = settlement ? `${settlement.boardSeed}:${settlement.revision}` : null;
   const boardRef = useRef<HTMLElement>(null);
   const [settlementStep, setSettlementStep] = useState<{ key: string; step: 'score' | 'bonus'; startedAt: number } | null>(null);
@@ -179,7 +181,9 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
     if (!choice || choice.rollId !== roll?.id || !game?.remaining.includes(choice.dieId)) return undefined;
     return game.results.find(result => result.id === choice.dieId);
   }, [game, roll?.id, choice]);
-  const seed = game?.boardSeed;
+  const settlementGame = settlement && info.settlementGame?.boardSeed === settlement.boardSeed ? info.settlementGame : null;
+  const displayGame = settlementGame ?? game;
+  const seed = displayGame?.boardSeed;
   const definition = useMemo(() => boardAdapter.getDefinition(seed), [boardAdapter, seed]);
   const eventRow = settlement ? definition.rows.find(row => row.id === settlement.rowId) : undefined;
   const eventGoal = eventRow ? goalColumn(definition, eventRow) : undefined;
@@ -220,19 +224,24 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
     return () => window.clearTimeout(timer);
   }, [connection, settlement, settlementKey, settlementStep?.key, settlementStep?.step, scoreDuration, coinMotionActive, followups.length]);
   const board = useMemo(() => {
-    const state = boardAdapter.createState(definition, game);
+    const state = boardAdapter.createState(definition, displayGame);
     const placement = info.placement;
     let next = state;
-    if (placement) {
+    if (!settlement && placement) {
       const rowId = definition.rows[placement.row]?.id;
       const columnId = definition.columns[placement.column]?.id;
       if (rowId && columnId) next = { ...next, placement: { cell: cellKey({ rowId, columnId }), id: placement.revision } };
     }
-    if (settlementScoreVisible && settlement && eventTarget && game?.boardSeed === settlement.boardSeed) {
+    if (settlement && eventTarget && displayGame?.boardSeed === settlement.boardSeed) {
+      const row = definition.rows.findIndex(item => item.id === eventTarget.rowId);
+      const column = definition.columns.findIndex(item => item.id === eventTarget.columnId);
+      if (row >= 0 && column >= 0) next = { ...next, placement: { cell: cellKey(eventTarget), id: settlement.revision } };
+    }
+    if (settlementScoreVisible && settlement && eventTarget && displayGame?.boardSeed === settlement.boardSeed) {
       next = { ...next, award: { id: settlement.revision, rowId: eventTarget.rowId, amount: settlement.points } };
     }
     return next;
-  }, [boardAdapter, definition, game, info.placement, settlementScoreVisible, settlement, eventTarget]);
+  }, [boardAdapter, definition, displayGame, game, info.placement, settlementScoreVisible, settlement, eventTarget]);
   const candidates = useMemo(() => canAct && inPlacement && selected
     ? placementCandidates(definition, board.occupied, selected.gem)
     : undefined, [canAct, inPlacement, selected, definition, board.occupied]);
@@ -286,7 +295,15 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
       {own && <button type="button" className="turn-change-skip" onClick={() => game && setAnnouncedTurnSequence(game.turnSequence)}>演出をスキップ</button>}
     </section>}
     <div className="settlement-stage">
-    <div className="table-layout">
+    {showFinalResults && info.match ? <section className="final-results-screen" aria-labelledby="final-results-title">
+      <h2 id="final-results-title">最終結果</h2>
+      <ol aria-label="最終順位">
+        {[...info.match.players].sort((left, right) => left.rank - right.rank || left.slot - right.slot).map(player =>
+          <li key={player.id}><span>{player.rank}位</span><span>{player.name}</span><strong>{player.score}点</strong></li>)}
+      </ol>
+      {finalResult && <p>{finalResult.winners.length > 1 ? '同率優勝' : '優勝'}：
+        {finalResult.winners.map(id => info.match?.players.find(player => player.id === id)?.name ?? id).join('、')}</p>}
+    </section> : <div className="table-layout">
       <div className="game-board">
         {waitingForBoard
           ? <div className="board-loading" role="status">共有盤面を読み込んでいます…</div>
@@ -333,7 +350,7 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
             : <span className="waiting-result">出目の確定を待っています。</span>}
         </div>
       </aside>
-    </div>
+    </div>}
     {settlement && <p key={settlementKey} className="sr-only" role="status" aria-live="polite">
       {settlement.playerName}　{scoreLabel(settlement.points)}
     </p>}

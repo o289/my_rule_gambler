@@ -47,6 +47,7 @@ export interface ConnectionView {
   playerId: string | null;
   dev: boolean;
   game: GameState | null;
+  settlementGame: GameState | null;
   match: MatchSetup | null;
   settlements: readonly MatchSettlementEvent[];
   roll: RollView | null;
@@ -58,7 +59,7 @@ export interface ConnectionView {
 }
 
 const HOLD: ConnectionView = {
-  status: 'connecting', playerId: null, dev: false, game: null, match: null, settlements: [], roll: null, tray: null,
+  status: 'connecting', playerId: null, dev: false, game: null, settlementGame: null, match: null, settlements: [], roll: null, tray: null,
   problem: '', metrics: null, pending: false, placement: null,
 };
 
@@ -74,6 +75,7 @@ export class DiceConnection {
   private listeners = new Set<() => void>();
   private impactListeners = new Set<(hits: readonly Impact[]) => void>();
   private settlementQueue = new SettlementEventQueue();
+  private settlementGames = new Map<string, GameState>();
   private readonly key: string;
 
   constructor(private readonly development: boolean, room: string, initialToken?: string) {
@@ -95,7 +97,10 @@ export class DiceConnection {
 
   completeSettlement(event: MatchSettlementEvent) {
     if (!this.settlementQueue.complete(event)) return;
-    this.update({ settlements: this.settlementQueue.getSnapshot() });
+    this.settlementGames.delete(`${event.boardSeed}:${event.revision}`);
+    const next = this.settlementQueue.getSnapshot()[0];
+    this.update({ settlements: this.settlementQueue.getSnapshot(),
+      settlementGame: next ? this.settlementGames.get(`${next.boardSeed}:${next.revision}`) ?? null : null });
   }
 
   private update(patch: Partial<ConnectionView>) {
@@ -151,8 +156,9 @@ export class DiceConnection {
         catch { this.update({ problem: 'このタブを開いたまま再接続できます。' }); }
         if (message.roll) this.frames.push(message.roll.latest);
         this.settlementQueue.clearPending();
+        this.settlementGames.clear();
         this.update({
-          status: 'online', playerId: message.playerId, game: message.state, roll: message.roll,
+          status: 'online', playerId: message.playerId, game: message.state, settlementGame: null, roll: message.roll,
           dev: message.dev, match: message.match ?? null, settlements: this.settlementQueue.getSnapshot(), tray: message.view ? message.roll?.id ?? null : null,
           pending: false, problem: '', placement: null,
         });
@@ -164,18 +170,23 @@ export class DiceConnection {
         const newTurn = nextMatch !== null && this.current.game !== null
           && message.state.turnSequence !== this.current.game.turnSequence;
         let settlements = this.current.settlements;
+        let settlementGame = this.current.settlementGame;
         if (message.settlement && nextMatch && this.current.match && message.state.boardSeed !== undefined
           && message.settlement.boardSeed === message.state.boardSeed
           && message.settlement.revision === message.state.revision) {
-          this.settlementQueue.enqueue(message.settlement);
+          if (this.settlementQueue.enqueue(message.settlement)) {
+            const key = `${message.settlement.boardSeed}:${message.settlement.revision}`;
+            this.settlementGames.set(key, message.state);
+            if (this.settlementQueue.getSnapshot()[0] === message.settlement) settlementGame = message.state;
+          }
           settlements = this.settlementQueue.getSnapshot();
         }
         if (message.roll) this.frames.push(message.roll.latest);
+        const placement = this.current.game?.boardSeed === message.state.boardSeed
+          ? confirmedPlacement(this.current.game, message.state) ?? this.current.placement
+          : null;
         this.update({
-          game: message.state, match: nextMatch, settlements, roll: message.roll, pending: false,
-          placement: this.current.game?.boardSeed === message.state.boardSeed
-            ? confirmedPlacement(this.current.game, message.state) ?? this.current.placement
-            : null,
+          game: message.state, settlementGame, match: nextMatch, settlements, roll: message.roll, pending: false, placement,
           tray: message.settlement ? null : newTurn ? null : newRoll ? message.roll?.id ?? null : this.current.tray,
           metrics: newRoll ? null : this.current.metrics,
           problem: '',

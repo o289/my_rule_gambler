@@ -2,7 +2,7 @@ import { COUNTDOWN_MS, MAX_PLAYERS } from '../../../shared/contracts/casino-entr
 import type { CasinoRoomInfo, LobbyState, ServerMessage as LobbyMessage } from '../../../shared/contracts/casino-entry';
 import type { ClientMessage as DiceClientMessage, DiceResult, Frame, GameState, MatchPlayerSetup, MatchSetup, MatchSettlementEvent, RollKind, RollView, ServerMessage as DiceMessage } from '../../../shared/contracts/dice';
 import { createGoalBoard } from '../../../features/board/model/goal-layout';
-import { goalColumn } from '../../../features/board/model/board-model';
+import { cellKey, goalColumn } from '../../../features/board/model/board-model';
 import type { BoardDefinition } from '../../../features/board/model/board-model';
 import { rankPlayers } from '../../../features/players/model/player-data';
 import {
@@ -35,6 +35,7 @@ import {
 import type { LobbyCountdownState, LobbyParticipant } from './lobby';
 import { availableSeatSlot, reconnectGraceExpired, roomGraceExpired } from './participant-lifecycle';
 import { settleCompletedRows } from './scoring';
+import { dealRoundDice } from './dice-round';
 import type { RoomRuntime, RollSession, TimerHandle } from './ports';
 
 export const ROOM_SESSION_GRACE_MS = 90_000;
@@ -92,6 +93,8 @@ export class Room {
   private game: DiceGameState | null = null;
   private boardSeed: number | null = null;
   private boardDefinition: BoardDefinition | null = null;
+  private roundNumber = 1;
+  private usedBoardSeeds = new Set<number>();
   private matchParticipants: MatchParticipant[] | null = null;
   private unusedDiceIds: string[] = [];
   private completedRows: string[] = [];
@@ -167,6 +170,7 @@ export class Room {
     if (this.mode !== 'standard' || !this.matchParticipants) return undefined;
     const ranks = rankPlayers(this.matchParticipants);
     return {
+      roundNumber: this.roundNumber,
       totalDice: 30,
       unusedDiceCount: this.unusedDiceIds.length,
       placedDiceCount: this.game?.board.size ?? 0,
@@ -182,12 +186,53 @@ export class Room {
 
   private initializeGame() {
     if (this.game) return false;
-    this.boardSeed = this.runtime.createBoardSeed();
+    this.boardSeed = this.nextBoardSeed();
     this.boardDefinition = createGoalBoard(this.boardSeed);
     if (this.mode === 'standard') this.initializeMatchParticipants();
     this.game = initialDiceGameState();
     const firstId = this.mode === 'standard' ? this.lobby.startedPlayers?.[0]?.id : this.participants[0]?.id;
     if (firstId) this.game = setFirstTurn(this.game, firstId);
+    return true;
+  }
+
+  private nextBoardSeed() {
+    let seed = this.runtime.createBoardSeed();
+    while (this.usedBoardSeeds.has(seed)) seed = (seed + 1) >>> 0;
+    this.usedBoardSeeds.add(seed);
+    return seed;
+  }
+
+  private startNextRound(lastPlayerId: string) {
+    if (this.mode !== 'standard' || !this.game || !this.matchParticipants || !this.boardDefinition) return false;
+    const dice = [
+      ...this.matchParticipants.flatMap(player => player.handDiceIds),
+      ...this.unusedDiceIds,
+      ...[...this.game.board.values()].flatMap(placement => placement.dieId ? [placement.dieId] : []),
+    ];
+    const distribution = dealRoundDice(dice, this.matchParticipants.length);
+    if (!distribution) return false;
+    this.matchParticipants = this.matchParticipants.map((player, index) => ({
+      ...player,
+      handDiceIds: [...(distribution.hands[index] ?? [])],
+    }));
+    this.unusedDiceIds = [...distribution.unused];
+    const nextTurn = finishTurnAfterPlacement(this.game, this.dicePlayers(), lastPlayerId);
+    this.roundNumber += 1;
+    this.completedRows = [];
+    this.matchResult = null;
+    this.rollSession?.stop();
+    this.rollSession = null;
+    this.rollView = null;
+    this.boardSeed = this.nextBoardSeed();
+    this.boardDefinition = createGoalBoard(this.boardSeed);
+    this.game = {
+      ...initialDiceGameState(),
+      turnId: nextTurn.turnId,
+      turnSequence: nextTurn.turnSequence,
+      revision: this.game.revision + 1,
+      config: this.game.config,
+    };
+    this.publish();
     return true;
   }
 
@@ -292,7 +337,7 @@ export class Room {
     const participant = joined.participant;
     joined.previous?.close(4001, 'session replaced');
     if (!this.game) return null;
-    if (!this.game.turnId) this.game = setFirstTurn(this.game, participant.id);
+    if (this.mode === 'preview' && !this.game.turnId) this.game = setFirstTurn(this.game, participant.id);
     const state = this.gameState();
     if (!state) return null;
     peer.send({
@@ -488,7 +533,8 @@ export class Room {
           const beforeCompleted = this.completedRows.includes(rowId);
           const afterCompleted = settlement.completedRows.includes(rowId);
           const settledPlayer = settlement.players.find(item => item.id === participant.id);
-          if (!beforeCompleted && afterCompleted && row && goal && settledPlayer) {
+          const goalPlacement = goal ? result.state.board.get(cellKey({ rowId, columnId: goal.id })) : undefined;
+          if (!beforeCompleted && afterCompleted && row && goal && goalPlacement && settledPlayer) {
             const beforeRanks = rankPlayers(this.matchParticipants);
             const afterRanks = rankPlayers(settlement.players);
             const seatById = new Map(this.lobby.startedPlayers?.map(seat => [seat.id, seat]) ?? []);
@@ -499,12 +545,14 @@ export class Room {
             }) ?? [];
             scoreEvent = {
               boardSeed: this.boardSeed ?? 0,
+              roundNumber: this.roundNumber,
               revision: result.state.revision,
               playerId: participant.id,
               playerName: seatById.get(participant.id)?.name ?? participant.name,
               rowId,
               columnId: goal.id,
               rowPoints: row.score,
+              gem: goalPlacement.gem,
               points: settledPlayer.score - matchParticipant.score,
               gameEnded: settlement.result?.status === 'won',
               beforeRanks: makeRanks(beforeRanks),
@@ -529,6 +577,18 @@ export class Room {
           } else {
             matchParticipant.handDiceIds = matchParticipant.handDiceIds.filter(id => id !== message.dieId);
           }
+        }
+        if (this.mode === 'standard' && result.status === 'placed' && settlement?.result) {
+          if (settlement.result.status === 'won') {
+            this.game = { ...this.game, phase: 'finished', turnId: null, turnNotice: null,
+              rollId: null, results: [], remaining: [], placedThisRoll: false };
+            this.rollSession?.stop();
+            this.rollSession = null;
+            this.rollView = null;
+          }
+          this.publish(scoreEvent);
+          if (settlement.result.status === 'continue') this.startNextRound(participant.id);
+          return;
         }
         if (this.mode === 'standard' && result.status === 'placed'
           && result.state.remaining.length === 0 && !this.matchResult) {

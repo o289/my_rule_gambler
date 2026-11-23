@@ -50,7 +50,7 @@ export interface GameState {
   turnId: string | null;
   turnSequence: number;
   turnNotice: 'no-legal-placement' | null;
-  phase: 'ready' | 'rolling' | 'confirm' | 'placement';
+  phase: 'ready' | 'rolling' | 'confirm' | 'placement' | 'finished';
   revision: number;
   config: RollConfig;
   boardSeed?: number;
@@ -90,12 +90,14 @@ export interface SettlementRank {
 
 export interface MatchSettlementEvent {
   readonly boardSeed: number;
+  readonly roundNumber: number;
   readonly revision: number;
   readonly playerId: string;
   readonly playerName: string;
   readonly rowId: string;
   readonly columnId: string;
   readonly rowPoints: number;
+  readonly gem: GemId;
   readonly points: number;
   readonly gameEnded: boolean;
   readonly beforeRanks: readonly SettlementRank[];
@@ -103,6 +105,7 @@ export interface MatchSettlementEvent {
 }
 
 export interface MatchSetup {
+  readonly roundNumber: number;
   readonly totalDice: 30;
   readonly unusedDiceCount: number;
   readonly placedDiceCount: number;
@@ -232,7 +235,8 @@ function placement(value: unknown): value is Placement {
 function gameState(value: unknown): value is GameState {
   return record(value) && listOf(value.seats, seat, 6) && (value.turnId === null || id(value.turnId))
     && int(value.turnSequence) && (value.turnNotice === null || value.turnNotice === 'no-legal-placement')
-    && ['ready', 'rolling', 'confirm', 'placement'].some(phase => phase === value.phase)
+    && ['ready', 'rolling', 'confirm', 'placement', 'finished'].some(phase => phase === value.phase)
+    && (value.phase !== 'finished' || value.turnId === null)
     && int(value.revision) && config(value.config)
     && (value.boardSeed === undefined || int(value.boardSeed, 0, 0xffff_ffff))
     && listOf(value.placements, placement, BOARD_ROWS * GEM_ORDER.length)
@@ -250,7 +254,7 @@ function matchPlayer(value: unknown): value is MatchPlayerSetup {
     && value.wallet.reduce((total: number, group: MatchWalletGroup) => total + group.denomination * group.count, 0) === value.score;
 }
 function matchSetup(value: unknown): value is MatchSetup {
-  if (!record(value) || value.totalDice !== 30 || !int(value.unusedDiceCount, 0, 30) || !int(value.placedDiceCount, 0, 30)
+  if (!record(value) || !int(value.roundNumber, 1) || value.totalDice !== 30 || !int(value.unusedDiceCount, 0, 30) || !int(value.placedDiceCount, 0, 30)
     || !listOf(value.completedRows, (item): item is string => typeof item === 'string' && item.length <= 80, 6)
     || !(value.result === null || matchResult(value.result))
     || !listOf(value.players, matchPlayer, 6) || value.players.length < 2) return false;
@@ -289,9 +293,10 @@ function matchSettlementEvent(value: unknown): value is MatchSettlementEvent {
   if (!record(value)) return false;
   const beforeCandidate = value.beforeRanks;
   const afterCandidate = value.afterRanks;
-  if (!int(value.boardSeed, 0, 0xffff_ffff) || !int(value.revision) || !id(value.playerId)
+  if (!int(value.boardSeed, 0, 0xffff_ffff) || !int(value.roundNumber, 1) || !int(value.revision) || !id(value.playerId)
     || typeof value.playerName !== 'string' || !value.playerName.length || value.playerName.length > 80
     || !id(value.rowId) || !id(value.columnId)
+    || !gem(value.gem)
     || typeof value.rowPoints !== 'number' || !Number.isSafeInteger(value.rowPoints) || value.rowPoints % 10 !== 0
     || typeof value.points !== 'number' || !Number.isSafeInteger(value.points) || value.points % 10 !== 0
     || typeof value.gameEnded !== 'boolean'
@@ -309,7 +314,7 @@ function matchSettlementEvent(value: unknown): value is MatchSettlementEvent {
     && beforeRanks.every(item => afterRanks.some(after => after.id === item.id));
 }
 function settlementMatchesMatch(event: MatchSettlementEvent, match: MatchSetup) {
-  return event.gameEnded === (match.result?.status === 'won')
+  return event.roundNumber === match.roundNumber && event.gameEnded === (match.result?.status === 'won')
     && match.players.some(player => player.id === event.playerId && player.name === event.playerName)
     && event.afterRanks.length === match.players.length
     && event.afterRanks.every(rank => match.players.some(player => player.id === rank.id

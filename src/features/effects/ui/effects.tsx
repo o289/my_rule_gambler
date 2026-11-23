@@ -171,7 +171,10 @@ export function ComebackEffect({ playback, params, stage }: SharedSceneProps & {
   );
 }
 
-export function JackpotVictoryEffect({ playback, params, stage, scenario }: ScenarioSceneProps & { params: EffectParams['JACKPOT_VICTORY'] }) {
+export function JackpotVictoryEffect({ playback, params, stage, scenario, liveBoard }: SharedSceneProps & {
+  scenario: Pick<EffectScenario, 'board' | 'featuredCell'>;
+  params: EffectParams['JACKPOT_VICTORY']; liveBoard?: RefObject<HTMLElement | null>;
+}) {
   const board = useRef<HTMLElement>(null);
   const target = params.target ?? scenario.featuredCell;
   const impact = reached(playback, 'impact');
@@ -180,9 +183,9 @@ export function JackpotVictoryEffect({ playback, params, stage, scenario }: Scen
   useScreenShake(stage, active && impact, true);
   return (
     <>
-      <BoardScene viewportRef={board} definition={scenario.board} target={target} placed={params.gem} tone="gem" />
+      {!liveBoard && <BoardScene viewportRef={board} definition={scenario.board} target={target} placed={params.gem} tone="gem" />}
       <div className="jackpot-vignette" data-phase={playback.phase} aria-hidden="true" />
-      {active && reached(playback, 'gather') && !reached(playback, 'silence') && <ConvergingLights stage={stage} board={board} />}
+      {active && reached(playback, 'gather') && !reached(playback, 'silence') && <ConvergingLights stage={stage} board={liveBoard ?? board} />}
       {!impact && reached(playback, 'gather') && <div className="jackpot-energy" data-phase={playback.phase} aria-hidden="true" />}
       {impact && (
         <div className="jackpot-slate" data-animate={active} data-complete={!playback.playing}>
@@ -226,7 +229,7 @@ export function EffectScene({ playback, stage, scenario, settleRoll, liveBoard }
     }
     case 'TURN_CHANGE': return <TurnChangeEffect playback={playback} params={request.params} scenario={scenario} />;
     case 'COMEBACK': return <ComebackEffect playback={playback} params={request.params} stage={stage} />;
-    case 'JACKPOT_VICTORY': return <JackpotVictoryEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
+    case 'JACKPOT_VICTORY': return <JackpotVictoryEffect playback={playback} params={request.params} stage={stage} scenario={scenario} liveBoard={liveBoard} />;
   }
 }
 

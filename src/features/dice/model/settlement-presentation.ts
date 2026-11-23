@@ -27,8 +27,17 @@ export function settlementFollowups(event: MatchSettlementEvent, board: BoardDef
   const target = { rowId: event.rowId, columnId: event.columnId } satisfies CellAddress;
   const score: EffectParams['BOARD_SCORE'] = { playerName: event.playerName, points: event.points, target };
   const rankChange = settlementRankChange(event);
-  return settlementEffects({ score, rankChange, gameEnded: event.gameEnded }).slice(1)
+  const followups = settlementEffects({ score, rankChange, gameEnded: event.gameEnded }).slice(1)
     .map(([kind, params]: EffectCall) => readEffect(kind, params, { board, featuredCell: target }));
+  if (event.gameEnded) {
+    const winners = event.afterRanks.filter(item => item.rank === 1);
+    const winner = winners[0];
+    if (winners.length === 1 && winner) {
+      followups.push(readEffect('JACKPOT_VICTORY', { playerName: winner.name, gem: event.gem, target },
+        { board, featuredCell: target }));
+    }
+  }
+  return followups;
 }
 
 export interface ComebackHint {

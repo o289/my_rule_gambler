@@ -17,12 +17,14 @@ const board: BoardDefinition = {
 function event(points: number, overrides: Partial<MatchSettlementEvent> = {}): MatchSettlementEvent {
   return {
     boardSeed: 17,
+    roundNumber: 1,
     revision: 4,
     playerId: 'p1',
     playerName: 'Player One',
     rowId: 'row-a',
     columnId: 'goal',
     rowPoints: 100,
+    gem: 'sapphire',
     points,
     gameEnded: false,
     beforeRanks: [{ id: 'p1', name: 'Player One', rank: 2 }, { id: 'p2', name: 'Player Two', rank: 1 }],
@@ -57,6 +59,16 @@ test('settlement bonus uses the actual all-player ranks, including unchanged sco
   assert.equal(rise?.toRank, 1);
   assert.deepEqual(settlementEffects({ score: { ...score, points: 120 }, gameEnded: true }).map(([kind]) => kind), ['BOARD_SCORE']);
   assert.deepEqual(settlementFollowups(event(100), board).map(effect => effect.kind), ['BIG_WIN', 'COMEBACK']);
+  const finalFollowups = settlementFollowups(event(100, { gameEnded: true, afterRanks: [
+    { id: 'p1', name: 'Player One', rank: 2 }, { id: 'p2', name: 'Player Two', rank: 1 },
+  ] }), board);
+  assert.deepEqual(finalFollowups.map(effect => effect.kind), ['JACKPOT_VICTORY']);
+  assert.equal(finalFollowups[0]?.kind === 'JACKPOT_VICTORY' ? finalFollowups[0].params.playerName : '', 'Player Two',
+    'the final effect names the actual single leader, even when another player placed the last goal');
+  assert.equal(finalFollowups[0]?.kind === 'JACKPOT_VICTORY' ? finalFollowups[0].params.gem : '', 'sapphire');
+  assert.deepEqual(settlementFollowups(event(100, { gameEnded: true,
+    afterRanks: [{ id: 'p1', name: 'Player One', rank: 1 }, { id: 'p2', name: 'Player Two', rank: 1 }],
+  }), board), [], 'a tied top result has a ranking but no single-winner JACKPOT');
   assert.equal(settlementRankChange(event(20, {
     beforeRanks: [{ id: 'p1', name: 'Player One', rank: 1 }, { id: 'p2', name: 'Player Two', rank: 2 }],
     afterRanks: [{ id: 'p1', name: 'Player One', rank: 1 }, { id: 'p2', name: 'Player Two', rank: 2 }],
@@ -101,7 +113,8 @@ test('an older snapshot from the same board cannot roll back newer score or plac
   });
   assert.equal(acceptsGameState(game(17, 9), game(17, 8)), false);
   assert.equal(acceptsGameState(game(17, 9), game(17, 9)), true);
-  assert.equal(acceptsGameState(game(17, 9), game(18, 0)), true, 'a new board seed starts a new revision sequence');
+  assert.equal(acceptsGameState(game(17, 9), game(18, 10)), true, 'the revision advances across a round boundary');
+  assert.equal(acceptsGameState(game(18, 10), game(17, 9)), false, 'an older round cannot roll the client back');
 });
 
 test('one-cell comeback hint points only to an actual legal final cell for a confirmed remaining die', () => {

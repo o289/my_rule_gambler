@@ -325,7 +325,7 @@ test('standard turns hand off after the last used die and after a confirmed roll
   } finally { noMoveRegistry.dispose(); }
 });
 
-test('a complete board publishes its result without advancing the turn and rejects the next roll', async () => {
+test('a completed sub-500 board publishes its settlement then starts a fresh round from all thirty dice', async () => {
   const registry = new RoomRegistry(runtime, 5);
   try {
     const room = registry.create({ id: 'f011b0a2', name: '完成盤面' });
@@ -387,24 +387,243 @@ test('a complete board publishes its result without advancing the turn and rejec
 
     const finalState = latest(dice[0]!);
     assert.ok(finalState.turnId);
-    assert.equal(finalState.placements.length, 21);
-    assert.equal(finalState.phase, 'placement');
-    assert.equal(finalState.remaining.length, 0);
-    assert.equal(finalState.turnSequence, 5, 'the last placement does not begin another turn');
-    const finalMatch = [...dice[0]!.messages].reverse().find(item => item.type === 'state' && item.match?.result !== null);
+    assert.equal(finalState.placements.length, 0);
+    assert.equal(finalState.phase, 'ready');
+    assert.equal(finalState.turnSequence, 6, 'the next round starts at the seat after the final placer');
+    assert.equal(finalState.revision, 31, 'revision remains monotonic across the new board');
+    assert.equal(finalState.boardSeed, 18, 'a repeated runtime seed is advanced to make a fresh board identity');
+    const finalRound = [...dice[0]!.messages].reverse().find(item => item.type === 'state' && item.match?.result?.status === 'continue');
+    assert.ok(finalRound?.type === 'state' && finalRound.match);
+    assert.equal(finalRound.state.placements.length, 21);
+    assert.equal(finalRound.match.completedRows.length, 6);
+    assert.equal(finalRound.match.roundNumber, 1);
+    assert.equal(finalRound.match.result?.status, 'continue');
+    assert.deepEqual(dice.map(peer => peer.messages.filter(item => item.type === 'state' && item.settlement).length), [6, 6]);
+    assert.equal(finalState.turnId, ids[(ids.indexOf(finalRound.state.turnId ?? '') + 1) % ids.length],
+      'the next round begins with the fixed seat after the previous final placer');
+    const finalMatch = [...dice[0]!.messages].reverse().find(item => item.type === 'state' && item.match?.roundNumber === 2);
     assert.ok(finalMatch?.type === 'state' && finalMatch.match);
-    assert.equal(finalMatch.match.completedRows.length, 6);
-    assert.equal(finalMatch.match.result?.status, 'continue');
+    assert.equal(finalMatch.match.roundNumber, 2);
+    assert.equal(finalMatch.match.result, null);
+    assert.deepEqual(finalMatch.match.players.map(player => player.diceCount), [15, 15]);
+    assert.equal(finalMatch.match.unusedDiceCount, 0);
+    assert.equal(finalMatch.match.placedDiceCount, 0);
+    assert.deepEqual(finalMatch.match.players.map(player => player.score), finalRound.match.players.map(player => player.score));
     const stateMessagesBefore = dice.flatMap(peer => peer.messages).filter(item => item.type === 'state').length;
-    const finalPlayerIndex = ids.indexOf(finalState.turnId);
-    assert.notEqual(finalPlayerIndex, -1);
-    const finalPeer = dice[finalPlayerIndex]!;
-    room.commandDice(finalState.turnId, finalPeer, {
-      type: 'end-turn', revision: finalState.revision, turnSequence: finalState.turnSequence,
+    const nextPlayerIndex = ids.indexOf(finalState.turnId);
+    assert.notEqual(nextPlayerIndex, -1);
+    const nextPeer = dice[nextPlayerIndex]!;
+    const staleRoll = [...dice[0]!.messages].reverse().find(item => item.type === 'state' && item.state.boardSeed === 17 && item.roll);
+    assert.ok(staleRoll?.type === 'state' && staleRoll.roll);
+    room.commandDice(finalState.turnId, nextPeer, {
+      type: 'end-turn', revision: finalRound.state.revision, turnSequence: finalRound.state.turnSequence,
     });
-    room.commandDice(finalState.turnId, finalPeer, {
-      type: 'roll', requestId: 'after-completed-board', turnSequence: finalState.turnSequence,
+    room.commandDice(finalState.turnId, nextPeer, {
+      type: 'place', rollId: staleRoll.roll.id, dieId: 'stale-die', row: 0, column: 0, revision: finalRound.state.revision,
+    });
+    room.commandDice(finalState.turnId, nextPeer, {
+      type: 'roll', requestId: 'old-round-sequence', turnSequence: finalRound.state.turnSequence,
     });
     assert.equal(dice.flatMap(peer => peer.messages).filter(item => item.type === 'state').length, stateMessagesBefore);
+  } finally { registry.dispose(); }
+});
+
+test('a four-player completed board redeals seven dice each, leaves two unused, and preserves scores', async () => {
+  const registry = new RoomRegistry(runtime, 5);
+  try {
+    const room = registry.create({ id: '4d1ce004', name: '4人再配分' });
+    assert.ok(room);
+    const lobby = Array.from({ length: 4 }, () => new LobbyGuest());
+    lobby.forEach(peer => room.connectLobby(peer));
+    lobby.forEach(peer => room.commandLobby(peer.welcome.playerId, peer, { type: 'ready', ready: true }));
+    await delay(20);
+    const dice = lobby.map(() => new DiceGuest());
+    dice.forEach((peer, index) => room.connectDice(peer, { token: lobby[index]!.welcome.token }));
+    const ids = lobby.map(peer => peer.welcome.playerId);
+    const definition = createGoalBoard(17);
+    const targets = definition.rows.flatMap((row, rowIndex) => playableColumns(definition, row).flatMap(column => {
+      const gem = requiredGemAt(definition, { rowId: row.id, columnId: column.id });
+      return gem ? [{ rowIndex, column: definition.columns.findIndex(item => item.id === column.id), gem }] : [];
+    }));
+    const chunks = [3, 4, 2, 2, 2, 3, 2, 2, 1];
+    const players = [0, 1, 2, 3, 0, 1, 2, 3, 0];
+    let offset = 0;
+    for (let turn = 0; turn < chunks.length; turn += 1) {
+      const playerIndex = players[turn];
+      const count = chunks[turn];
+      assert.ok(playerIndex !== undefined && count !== undefined);
+      const peer = dice[playerIndex]!;
+      const chunk = targets.slice(offset, offset + count);
+      const current = [...peer.messages].reverse().find(item => item.type === 'state' || item.type === 'welcome');
+      assert.ok(current && (current.type === 'state' || current.type === 'welcome'));
+      room.commandDice(ids[playerIndex]!, peer, { type: 'roll', requestId: `four-player-${turn}`, turnSequence: current.state.turnSequence });
+      const rolling = [...peer.messages].reverse().find(item => item.type === 'state' && item.state.phase === 'rolling');
+      assert.ok(rolling?.type === 'state' && rolling.roll);
+      const results = rolling.roll.latest.dice.map((die, index) => ({
+        id: die.id, gem: chunk[index]?.gem ?? 'ruby' as const, approximate: false,
+      }));
+      assert.ok(completeRoll);
+      completeRoll({ ...rolling.roll.latest, phase: 'settled', seq: 1,
+        dice: rolling.roll.latest.dice.map(die => ({ ...die, stopped: true })) }, results, 0, false);
+      room.commandDice(ids[playerIndex]!, peer, { type: 'confirm', rollId: rolling.roll.id });
+      for (const target of chunk) {
+        const placedState = [...peer.messages].reverse().find(item => item.type === 'state' || item.type === 'welcome');
+        assert.ok(placedState && (placedState.type === 'state' || placedState.type === 'welcome'));
+        const die = results.find(item => item.gem === target?.gem && placedState.state.remaining.includes(item.id));
+        assert.ok(target && die);
+        room.commandDice(ids[playerIndex]!, peer, { type: 'place', rollId: rolling.roll.id, dieId: die.id,
+          row: target.rowIndex, column: target.column, revision: placedState.state.revision });
+      }
+      offset += count;
+      if (count < results.length) {
+        const after = [...peer.messages].reverse().find(item => item.type === 'state' || item.type === 'welcome');
+        assert.ok(after && (after.type === 'state' || after.type === 'welcome'));
+        room.commandDice(ids[playerIndex]!, peer, { type: 'end-turn', revision: after.state.revision,
+          turnSequence: after.state.turnSequence });
+      }
+      if (turn === 5) {
+        const exhausted = [...peer.messages].reverse().find(item => item.type === 'state' && item.match?.roundNumber === 1);
+        assert.ok(exhausted?.type === 'state' && exhausted.match);
+        assert.equal(exhausted.match.players[1]?.diceCount, 0, 'seat two has no dice immediately before the final player');
+      }
+    }
+    const continued = [...dice[0]!.messages].reverse().find(item => item.type === 'state' && item.match?.roundNumber === 1);
+    assert.ok(continued?.type === 'state' && continued.match);
+    const scoresAtRoundEnd = continued.match.players.map(player => player.score);
+    assert.equal(continued.state.placements.length, 21);
+    assert.equal(new Set(continued.state.placements.map(item => item.dieId)).size, 21);
+    const next = [...dice[0]!.messages].reverse().find(item => item.type === 'state' && item.match?.roundNumber === 2);
+    assert.ok(next?.type === 'state' && next.match);
+    assert.equal(next.state.placements.length, 0);
+    assert.equal(next.match.roundNumber, 2);
+    assert.equal(next.match.unusedDiceCount, 2);
+    assert.deepEqual(next.match.players.map(player => player.diceCount), [7, 7, 7, 7]);
+    assert.deepEqual(next.match.players.map(player => player.score), scoresAtRoundEnd);
+    assert.equal(next.match.placedDiceCount + next.match.unusedDiceCount
+      + next.match.players.reduce((sum, player) => sum + player.diceCount, 0), 30);
+    assert.equal(next.state.turnId, ids[1], 'the seat after the final placer starts, even if it had exhausted its previous hand');
+    assert.deepEqual(next.match.players.map(player => player.wallet), continued.match.players.map(player => player.wallet));
+  } finally { registry.dispose(); }
+});
+
+test('a single player wins after two rounds, not the final placer, and reconnect cannot resume a finished game', async () => {
+  const registry = new RoomRegistry(runtime, 5);
+  try {
+    const room = registry.create({ id: 'c0ffee22', name: '終局と再接続' });
+    assert.ok(room);
+    const lobby = [new LobbyGuest(), new LobbyGuest()];
+    lobby.forEach(peer => room.connectLobby(peer));
+    lobby.forEach(peer => room.commandLobby(peer.welcome.playerId, peer, { type: 'ready', ready: true }));
+    await delay(20);
+    const dice = [new DiceGuest(), new DiceGuest()];
+    dice.forEach((peer, index) => room.connectDice(peer, { token: lobby[index]!.welcome.token }));
+    const ids = lobby.map(peer => peer.welcome.playerId);
+    const latest = (peer: DiceGuest) => {
+      const message = [...peer.messages].reverse().find(item => item.type === 'state' || item.type === 'welcome');
+      assert.ok(message && (message.type === 'state' || message.type === 'welcome'));
+      return message;
+    };
+    const playTargets = (roundSeed: number, round: number) => {
+      const definition = createGoalBoard(roundSeed);
+      const positivePrefixes = definition.rows.flatMap((row, rowIndex) => row.score > 0
+        ? playableColumns(definition, row).slice(0, -1).map(column => ({
+          rowIndex, column: definition.columns.findIndex(item => item.id === column.id), gem: requiredGemAt(definition, { rowId: row.id, columnId: column.id }),
+        })) : []);
+      const positiveGoals = definition.rows.flatMap((row, rowIndex) => row.score > 0
+        ? playableColumns(definition, row).slice(-1).map(column => ({
+          rowIndex, column: definition.columns.findIndex(item => item.id === column.id), gem: requiredGemAt(definition, { rowId: row.id, columnId: column.id }),
+        })) : []);
+      const negativeGoal = definition.rows.flatMap((row, rowIndex) => row.score < 0
+        ? playableColumns(definition, row).slice(-1).map(column => ({
+          rowIndex, column: definition.columns.findIndex(item => item.id === column.id), gem: requiredGemAt(definition, { rowId: row.id, columnId: column.id }),
+        })) : []);
+      assert.equal(positivePrefixes.length, 15);
+      assert.equal(positiveGoals.length, 5);
+      assert.equal(negativeGoal.length, 1);
+      const chunks = [
+        { player: 0, cells: positivePrefixes.slice(0, 4), end: true },
+        { player: 1, cells: positivePrefixes.slice(4, 9), end: false },
+        { player: 0, cells: positivePrefixes.slice(9, 10), end: true },
+        { player: 1, cells: positivePrefixes.slice(10, 15), end: false },
+        { player: 0, cells: positiveGoals, end: false },
+        { player: 1, cells: negativeGoal, end: false },
+      ];
+      let lastPlacement: { rollId: string; dieId: string; row: number; column: number; revision: number } | null = null;
+      for (const [turnIndex, turn] of chunks.entries()) {
+        const peer = dice[turn.player]!;
+        const stateBefore = latest(peer);
+        assert.ok(stateBefore.type === 'state' || stateBefore.type === 'welcome');
+        assert.equal(stateBefore.state.turnId, ids[turn.player], `round ${round} turn ${turnIndex + 1} follows fixed order`);
+        room.commandDice(ids[turn.player]!, peer, {
+          type: 'roll', requestId: `winner-r${round}-roll-${turnIndex}`, turnSequence: stateBefore.state.turnSequence,
+        });
+        const rolling = [...peer.messages].reverse().find(item => item.type === 'state' && item.state.phase === 'rolling');
+        assert.ok(rolling?.type === 'state' && rolling.roll);
+        const results = rolling.roll.latest.dice.map((die, index) => ({
+          id: die.id, gem: turn.cells[index]?.gem ?? 'ruby' as const, approximate: false,
+        }));
+        assert.ok(completeRoll);
+        completeRoll({ ...rolling.roll.latest, phase: 'settled', seq: 1,
+          dice: rolling.roll.latest.dice.map(die => ({ ...die, stopped: true })) }, results, 0, false);
+        room.commandDice(ids[turn.player]!, peer, { type: 'confirm', rollId: rolling.roll.id });
+        for (const target of turn.cells) {
+          const placedState = latest(peer);
+          assert.ok(placedState.type === 'state' || placedState.type === 'welcome');
+          const die = results.find(item => item.gem === target.gem && placedState.state.remaining.includes(item.id));
+          assert.ok(die, `round ${round} turn ${turnIndex + 1} has the matching die`);
+          lastPlacement = { rollId: rolling.roll.id, dieId: die.id, row: target.rowIndex, column: target.column,
+            revision: placedState.state.revision };
+          room.commandDice(ids[turn.player]!, peer, { type: 'place', ...lastPlacement });
+        }
+        if (turn.end) {
+          const afterTurn = latest(peer);
+          assert.ok(afterTurn.type === 'state' || afterTurn.type === 'welcome');
+          room.commandDice(ids[turn.player]!, peer, { type: 'end-turn', revision: afterTurn.state.revision,
+            turnSequence: afterTurn.state.turnSequence });
+        }
+      }
+      assert.ok(lastPlacement);
+      return lastPlacement;
+    };
+
+    playTargets(17, 1);
+    const afterFirstRound = latest(dice[0]!);
+    assert.equal(afterFirstRound.type === 'state' || afterFirstRound.type === 'welcome' ? afterFirstRound.match?.roundNumber : 0, 2);
+    const secondRoundLast = playTargets(18, 2);
+    const finished = latest(dice[0]!);
+    assert.ok(finished.type === 'state');
+    assert.equal(finished.state.phase, 'finished');
+    assert.equal(finished.state.turnId, null);
+    assert.equal(finished.roll, null);
+    assert.equal(finished.match?.roundNumber, 2);
+    assert.deepEqual(finished.match?.result, { status: 'won', highestScore: 500, winners: [ids[0]] });
+    assert.notEqual(ids[1], ids[0], 'the last placer is not the winning player');
+    const finalEvents = dice[0]!.messages.filter(item => item.type === 'state' && item.settlement?.gameEnded);
+    assert.equal(finalEvents.length, 1, 'one final goal emits one terminal settlement event');
+    assert.deepEqual(dice.map(peer => peer.messages.filter(item => item.type === 'state' && item.settlement?.gameEnded).length), [1, 1]);
+    const eventMessage = finalEvents[0];
+    assert.ok(eventMessage?.type === 'state' && eventMessage.settlement);
+    if (eventMessage?.type === 'state' && eventMessage.settlement) {
+      assert.equal(eventMessage.settlement.roundNumber, 2);
+      assert.equal(eventMessage.settlement.playerId, ids[1], 'the second player placed the final goal');
+      assert.equal(eventMessage.settlement.afterRanks.find(item => item.rank === 1)?.id, ids[0]);
+    }
+    const replacement = new DiceGuest();
+    room.connectDice(replacement, { token: lobby[0]!.welcome.token });
+    const resumed = replacement.messages.find(item => item.type === 'welcome');
+    assert.ok(resumed?.type === 'welcome');
+    if (resumed?.type === 'welcome') {
+      assert.equal(resumed.state.phase, 'finished');
+      assert.equal(resumed.state.turnId, null, 'reconnect cannot restore a finished turn');
+      assert.equal(resumed.roll, null, 'the final reconnect has no stale tray');
+      assert.deepEqual(resumed.match?.result, finished.match?.result);
+    }
+    const beforeFinishedCommands = dice.flatMap(peer => peer.messages).filter(item => item.type === 'state').length;
+    room.commandDice(ids[0]!, replacement, { type: 'roll', requestId: 'finished-roll', turnSequence: finished.state.turnSequence });
+    room.commandDice(ids[0]!, replacement, { type: 'place', ...secondRoundLast });
+    room.commandDice(ids[0]!, replacement, { type: 'end-turn', revision: finished.state.revision,
+      turnSequence: finished.state.turnSequence });
+    assert.equal(dice.flatMap(peer => peer.messages).filter(item => item.type === 'state').length, beforeFinishedCommands,
+      'a finished game rejects stale, duplicate, and new turn commands');
   } finally { registry.dispose(); }
 });

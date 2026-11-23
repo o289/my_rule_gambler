@@ -81,6 +81,17 @@ body:has(.tray-dialog[open]) { overflow: hidden; }
   align-items: start;
   gap: clamp(12px, 2vw, 25px);
 }
+.final-results-screen {
+  width: min(100%, 760px); margin: 0 auto; padding: clamp(18px, 4vw, 38px);
+  border: 1px solid #9a7044; border-radius: 10px; color: #f4dfbd;
+  background: radial-gradient(ellipse at 50% 0%, #60452b, #21150f 70%);
+  box-shadow: inset 0 0 0 1px #e1b77526, 0 12px 35px #08040280;
+}
+.final-results-screen h2 { margin: 0 0 16px; color: #ffe1a5; font: 600 clamp(1.5rem, 4vw, 2.2rem)/1.2 var(--serif); text-align: center; }
+.final-results-screen ol { display: grid; gap: 8px; max-width: 540px; margin: 0 auto; padding: 0; list-style: none; }
+.final-results-screen li { display: grid; grid-template-columns: 3.5em minmax(0, 1fr) auto; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #8d68454d; }
+.final-results-screen li strong { color: #ffe1a5; }
+.final-results-screen > p { margin: 18px 0 0; color: #ffe1a5; text-align: center; font-weight: 700; }
 .game-board { min-width: 0; }
 .settlement-stage { position: relative; }
 .live-effects-layer {

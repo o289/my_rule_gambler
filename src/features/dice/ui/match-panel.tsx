@@ -75,8 +75,9 @@ export function MatchPanel({ room, match, turnId, playerId, turnSequence, settle
   const movingCoins = coinActive && Boolean(moves?.outgoing.length || moves?.incoming.length);
   const incomingTargets = settledPlayer && moves && coinActive ? moves.incoming : [];
   const outgoingSources = settledPlayer && moves && coinActive ? moves.outgoing : [];
-  return <section ref={stage} className="match-initial-state" aria-label="対戦の初期状態">
+  return <section ref={stage} className="match-initial-state" aria-label="対戦状態">
     {movingCoins && <CoinFlights stage={stage} flights={flights} />}
+    <p className="match-round-number">ラウンド {settlement?.roundNumber ?? match.roundNumber}</p>
     {!settlement && match.result && <p className="match-result" role="status">
       {match.result.status === 'won'
         ? `${match.result.winners.length > 1 ? '同率優勝' : '勝者'}：${match.result.winners.map(id => match.players.find(player => player.id === id)?.name ?? id).join('、')}（${match.result.highestScore}点）`
