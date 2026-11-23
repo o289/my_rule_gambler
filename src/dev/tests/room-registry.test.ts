@@ -78,7 +78,10 @@ test('one registry Room carries the frozen lobby seats into the dice connection'
     assert.ok(rolling?.type === 'state' && rolling.roll);
     const rollId = rolling.roll.id;
     const definition = createGoalBoard(17);
-    const open = nextOpenCell(definition, new Map(), definition.rows[0]!.id);
+    const scoredRowIndex = definition.rows.findIndex(row => row.score < 0 && row.cells && Object.keys(row.cells).length === 1);
+    assert.notEqual(scoredRowIndex, -1);
+    const scoredRow = definition.rows[scoredRowIndex]!;
+    const open = nextOpenCell(definition, new Map(), scoredRow.id);
     assert.ok(open);
     const gem = requiredGemAt(definition, open);
     assert.ok(gem);
@@ -87,10 +90,22 @@ test('one registry Room carries the frozen lobby seats into the dice connection'
     assert.ok(completeRoll);
     completeRoll(settled, results, 0, false);
     room.commandDice(firstId, dice[0]!, { type: 'confirm', rollId });
+    const beforePlace = [...dice[0]!.messages].reverse().find(message => message.type === 'state' && message.state.phase === 'placement');
+    assert.ok(beforePlace?.type === 'state');
     const column = definition.columns.findIndex(item => item.id === open.columnId);
-    room.commandDice(firstId, dice[0]!, { type: 'place', rollId, dieId: results[0]!.id, row: 0, column });
+    const place = { type: 'place' as const, rollId, dieId: results[0]!.id, row: scoredRowIndex, column, revision: beforePlace.state.revision };
+    room.commandDice(firstId, dice[0]!, place);
     const placed = [...dice[0]!.messages].reverse().find(message => message.type === 'state' && message.state.placements.length > 0);
     assert.ok(placed?.type === 'state');
+    if (placed?.type === 'state') {
+      assert.equal(placed.match?.players[0]?.score, 70, 'the negative goal charges only ten points once');
+      assert.deepEqual(placed.match?.players[0]?.wallet, [{ denomination: 50, count: 1 }, { denomination: 10, count: 2 }]);
+      assert.deepEqual(placed.match?.completedRows, [scoredRow.id]);
+      room.commandDice(firstId, dice[0]!, place);
+      const afterDuplicate = [...dice[0]!.messages].reverse().find(message => message.type === 'state');
+      assert.ok(afterDuplicate?.type === 'state');
+      assert.equal(afterDuplicate.match?.players[0]?.score, 70, 'a stale duplicate placement cannot settle twice');
+    }
     const replacement = new DiceGuest();
     room.connectDice(replacement, { token: lobby[0]!.welcome.token });
     const resumed = replacement.messages.find(message => message.type === 'welcome');
@@ -101,6 +116,7 @@ test('one registry Room carries the frozen lobby seats into the dice connection'
       assert.equal(resumed.state.turnId, placed.state.turnId);
       assert.equal(resumed.state.placements[0]?.dieId, results[0]!.id);
       assert.equal(resumed.match?.players[0]?.diceCount, 14);
+      assert.equal(resumed.match?.players[0]?.score, 70);
       assert.equal(resumed.match?.placedDiceCount, 1);
       room.disconnect(firstId, dice[0]!);
       room.commandDice(firstId, replacement, { type: 'end-turn', revision: placed.state.revision });

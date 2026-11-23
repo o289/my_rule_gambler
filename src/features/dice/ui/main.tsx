@@ -138,7 +138,7 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const { game, roll } = info;
   const own = Boolean(game?.turnId && game.turnId === info.playerId);
   const inPlacement = game?.phase === 'placement';
-  const canAct = own && info.status === 'online' && !info.pending;
+  const canAct = own && info.status === 'online' && !info.pending && !info.match?.result;
   const [monitor, setMonitor] = useState(false);
   const [fps, setFps] = useState<number | null>(null);
   const [choice, setChoice] = useState<{ rollId: string; dieId: string }>();
@@ -221,7 +221,8 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
             onClick={() => connection.roll('roll')}>ROLL DICE</button>}
         </div>
         <p className="turn-note">
-          {info.status !== 'online' ? 'ルームに接続しています。'
+          {info.match?.result ? info.match.result.status === 'won' ? '対戦結果が確定しました。' : 'ラウンドが完成しました。'
+            : info.status !== 'online' ? 'ルームに接続しています。'
             : !own ? '手番のプレイヤーの操作を待っています。'
             : inPlacement && game?.hasLegalPlacement ? '出目を選び、行の左端の空きマスに置きます。'
             : inPlacement && devReroll ? '開発モードでは配置前の振り直しも試せます。'

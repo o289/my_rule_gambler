@@ -46,7 +46,7 @@ function withScore(seed: PlayerSeed): Player {
   return { ...seed, score: scoreCoins(seed.coins) };
 }
 
-export function rankPlayers(players: readonly Player[]) {
+export function rankPlayers(players: readonly Pick<Player, 'id' | 'score'>[]) {
   const sorted = [...players].sort((left, right) => right.score - left.score);
   const ranks = new Map<string, number>();
   let lastScore: number | undefined;

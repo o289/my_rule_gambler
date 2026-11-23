@@ -55,6 +55,11 @@ export function MatchPanel({ room, match, turnId, playerId, revision }: {
 
   if (!match) return null;
   return <section className="match-initial-state" aria-label="対戦の初期状態">
+    {match.result && <p className="match-result" role="status">
+      {match.result.status === 'won'
+        ? `${match.result.winners.length > 1 ? '同率優勝' : '勝者'}：${match.result.winners.map(id => match.players.find(player => player.id === id)?.name ?? id).join('、')}（${match.result.highestScore}点）`
+        : `盤面完成・最高${match.result.highestScore}点`}
+    </p>}
     <div className="match-bank">
       <div className="match-state-heading">
         <h2>銀行</h2>

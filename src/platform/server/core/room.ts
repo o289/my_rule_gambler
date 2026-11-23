@@ -3,6 +3,7 @@ import type { CasinoRoomInfo, LobbyState, ServerMessage as LobbyMessage } from '
 import type { ClientMessage as DiceClientMessage, DiceResult, Frame, GameState, MatchPlayerSetup, MatchSetup, RollKind, RollView, ServerMessage as DiceMessage } from '../../../shared/contracts/dice';
 import { createGoalBoard } from '../../../features/board/model/goal-layout';
 import type { BoardDefinition } from '../../../features/board/model/board-model';
+import { rankPlayers } from '../../../features/players/model/player-data';
 import {
   beginRoll,
   canConfigure,
@@ -30,6 +31,7 @@ import {
 } from './lobby';
 import type { LobbyCountdownState, LobbyParticipant } from './lobby';
 import { availableSeatSlot, reconnectGraceExpired, roomGraceExpired } from './participant-lifecycle';
+import { settleCompletedRows } from './scoring';
 import type { RoomRuntime, RollSession, TimerHandle } from './ports';
 
 export const ROOM_SESSION_GRACE_MS = 90_000;
@@ -66,8 +68,8 @@ interface Participant {
 
 interface MatchParticipant {
   readonly id: string;
-  readonly score: number;
-  readonly wallet: MatchPlayerSetup['wallet'];
+  score: number;
+  wallet: MatchPlayerSetup['wallet'];
   handDiceIds: string[];
 }
 
@@ -89,6 +91,8 @@ export class Room {
   private boardDefinition: BoardDefinition | null = null;
   private matchParticipants: MatchParticipant[] | null = null;
   private unusedDiceIds: string[] = [];
+  private completedRows: string[] = [];
+  private matchResult: MatchSetup['result'] = null;
   private rollView: RollView | null = null;
   private rollSession: RollSession | null = null;
   private disposed = false;
@@ -155,13 +159,17 @@ export class Room {
 
   private matchState(): MatchSetup | undefined {
     if (this.mode !== 'standard' || !this.matchParticipants) return undefined;
+    const ranks = rankPlayers(this.matchParticipants);
     return {
       totalDice: 30,
       unusedDiceCount: this.unusedDiceIds.length,
       placedDiceCount: this.game?.board.size ?? 0,
+      completedRows: this.completedRows,
+      result: this.matchResult,
       players: this.matchParticipants.flatMap(({ handDiceIds, ...account }) => {
         const seat = this.lobby.startedPlayers?.find(item => item.id === account.id);
-        return seat ? [{ ...account, name: seat.name, slot: seat.slot, diceCount: handDiceIds.length }] : [];
+        const rank = ranks.get(account.id);
+        return seat && rank !== undefined ? [{ ...account, name: seat.name, slot: seat.slot, rank, diceCount: handDiceIds.length }] : [];
       }),
     };
   }
@@ -384,6 +392,7 @@ export class Room {
   commandDice(playerId: string, peer: DicePeer, message: DiceCommand) {
     const participant = this.participants.find(item => item.id === playerId && item.peer === peer);
     if (!participant || !this.game || !this.boardDefinition) return;
+    if (this.mode === 'standard' && this.matchResult) return;
     if (message.type === 'confirm') {
       if (this.rollView?.id !== message.rollId || !this.rollView.results.length) return;
       participant.viewedRoll = message.rollId;
@@ -437,6 +446,7 @@ export class Room {
         return;
       }
       case 'place': {
+        if (this.mode === 'standard' && message.revision !== this.game.revision) return;
         const matchParticipant = this.mode === 'standard'
           ? this.matchParticipants?.find(item => item.id === participant.id)
           : undefined;
@@ -450,9 +460,33 @@ export class Room {
           this.sendDiceError(peer, 'CELL', '行の左端の空きマスに、指定と同じ宝石のダイスを置けます。');
           return;
         }
+        let settlement: ReturnType<typeof settleCompletedRows> | null = null;
+        if (result.status === 'placed' && matchParticipant && this.mode === 'standard') {
+          const rowId = this.boardDefinition.rows[message.row]?.id;
+          if (!rowId || !this.matchParticipants) return;
+          settlement = settleCompletedRows(this.boardDefinition, result.state.board, {
+            players: this.matchParticipants,
+            completedRows: this.completedRows,
+            result: this.matchResult,
+          }, participant.id, rowId);
+        }
         this.game = result.state;
         if (result.status === 'placed' && matchParticipant) {
-          matchParticipant.handDiceIds = matchParticipant.handDiceIds.filter(id => id !== message.dieId);
+          if (settlement) {
+            const settledById = new Map(settlement.players.map(player => [player.id, player]));
+            this.matchParticipants = this.matchParticipants?.map(item => {
+              const settled = settledById.get(item.id);
+              return {
+                ...item,
+                ...(settled ? { score: settled.score, wallet: settled.wallet } : {}),
+                handDiceIds: item.id === participant.id ? item.handDiceIds.filter(id => id !== message.dieId) : item.handDiceIds,
+              };
+            }) ?? null;
+            this.completedRows = [...settlement.completedRows];
+            this.matchResult = settlement.result;
+          } else {
+            matchParticipant.handDiceIds = matchParticipant.handDiceIds.filter(id => id !== message.dieId);
+          }
         }
         this.publish();
         return;

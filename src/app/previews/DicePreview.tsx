@@ -33,7 +33,7 @@ function onSelect(cell: CellAddress, context: DiceBoardContext) {
   if (!canAct || !inPlacement || !roll || !selected || !canPlaceGem(definition, board.occupied, cell, selected.gem)) return;
   const row = definition.rows.findIndex(item => item.id === cell.rowId);
   const column = definition.columns.findIndex(item => item.id === cell.columnId);
-  connection.send({ type: 'place', row, column, rollId: roll.id, dieId: selected.id });
+  connection.send({ type: 'place', row, column, rollId: roll.id, dieId: selected.id, revision: context.game?.revision });
 }
 
 const boardAdapter: DiceBoardAdapter = {
