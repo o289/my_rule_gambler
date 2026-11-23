@@ -21,12 +21,12 @@ interface BoardSceneProps {
   definition: BoardDefinition;
   award?: BoardAward | null;
   scoreNotice?: { rowId: string; label: string };
-  turnCue?: { cells: readonly CellAddress[]; tone: 'aim' | 'available'; pulse: boolean };
+  aim?: 'outline' | 'pulse';
   placed?: GemId;
   tone?: 'gold' | 'gem';
 }
 
-export const BoardScene = memo(function BoardScene({ viewportRef, target, definition, award, scoreNotice, turnCue, placed, tone }: BoardSceneProps) {
+export const BoardScene = memo(function BoardScene({ viewportRef, target, definition, award, scoreNotice, aim, placed, tone }: BoardSceneProps) {
   const board = useRef<HTMLElement>(null);
   const state = useMemo(() => {
     const base = initialState(definition);
@@ -54,19 +54,15 @@ export const BoardScene = memo(function BoardScene({ viewportRef, target, defini
   }, [target, tone]);
 
   useLayoutEffect(() => {
-    if (!turnCue) return;
-    const cells = turnCue.cells.map(cell => locateCell(board.current, cell)).filter(cell => cell !== null);
-    for (const cell of cells) {
-      cell.dataset.turnTarget = turnCue.tone;
-      if (turnCue.pulse) cell.dataset.turnPulse = 'true';
-    }
+    const cell = locateCell(board.current, target);
+    if (!cell || !aim) return;
+    cell.dataset.turnTarget = 'aim';
+    if (aim === 'pulse') cell.dataset.turnPulse = 'true';
     return () => {
-      for (const cell of cells) {
-        delete cell.dataset.turnTarget;
-        delete cell.dataset.turnPulse;
-      }
+      delete cell.dataset.turnTarget;
+      delete cell.dataset.turnPulse;
     };
-  }, [turnCue]);
+  }, [aim, target]);
 
   function shareViewport(element: HTMLElement | null) {
     board.current = element;

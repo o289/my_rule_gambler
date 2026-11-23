@@ -11,7 +11,6 @@ export interface EffectParams {
   GEM_PLACEMENT: { gem: GemId; target: CellAddress };
   BIG_WIN: { playerName: string; points: number; target?: CellAddress };
   ONE_CELL_COMEBACK: { gem: GemId };
-  REROLL_THROW: { gem: GemId };
   TURN_CHANGE: { playerName: string; isLocal: boolean };
   LOSS_NOTICE: { playerName: string; paidPoints: number; target: CellAddress };
   COMEBACK: { playerName: string; opponents: readonly string[]; fromRank: number; toRank: number };
@@ -23,7 +22,6 @@ export type EffectRequest = { [K in EffectKind]: { kind: K; params: EffectParams
 export type EffectCall = { [K in EffectKind]: [kind: K, params: EffectParams[K]] }[EffectKind];
 
 export interface EffectTurnScenario {
-  board: BoardDefinition;
   comebackBoard: BoardDefinition;
   lastCell: CellAddress;
   comebackGem: GemId;
@@ -32,9 +30,6 @@ export interface EffectTurnScenario {
   currentPlayer: { name: string; score: number };
   nextPlayer: { name: string; score: number };
   comebackRank: EffectParams['COMEBACK'];
-  retainedGem: GemId;
-  rerollResults: { available: GemId; blocked: GemId };
-  rerollTargets: (gem: GemId) => readonly CellAddress[];
 }
 
 export interface EffectScenario {
@@ -52,20 +47,19 @@ export const EFFECT_LABELS: Record<EffectKind, string> = {
   BIG_WIN: 'BIG WIN',
   COMEBACK: 'COMEBACK',
   ONE_CELL_COMEBACK: 'あと1マスで逆転',
-  REROLL_THROW: '振り直しの一投',
   TURN_CHANGE: '手番の切り替え',
   LOSS_NOTICE: '失点の通知',
   JACKPOT_VICTORY: 'JACKPOT VICTORY',
 };
 
-export type Cue = 'start' | 'flight' | 'focus' | 'gather' | 'charge' | 'silence' | 'impact' | 'glow' | 'reveal' | 'finish' | 'roll' | 'roll-stop' | 'place' | 'comeback' | 'handoff';
+export type Cue = 'start' | 'flight' | 'focus' | 'gather' | 'charge' | 'silence' | 'impact' | 'glow' | 'reveal' | 'finish' | 'roll' | 'roll-stop' | 'place' | 'comeback';
 
 export interface Beat {
   at: number;
   cue: Cue;
 }
 
-const timeline: Record<Exclude<EffectKind, 'ONE_CELL_COMEBACK' | 'REROLL_THROW' | 'LOSS_NOTICE'>, readonly Beat[]> = {
+const timeline: Record<Exclude<EffectKind, 'ONE_CELL_COMEBACK' | 'LOSS_NOTICE'>, readonly Beat[]> = {
   TURN_CHANGE: [
     { at: 0, cue: 'start' },
     { at: 690, cue: 'finish' },
@@ -117,21 +111,17 @@ const quietDice: readonly Beat[] = [
   { at: 335, cue: 'finish' },
 ];
 
-function turnBeats(request: Extract<EffectRequest, { kind: 'ONE_CELL_COMEBACK' | 'REROLL_THROW' }>, reduced: boolean, scenario: EffectTurnScenario): readonly Beat[] {
-  const comeback = request.kind === 'ONE_CELL_COMEBACK';
-  const roll = comeback ? (reduced ? 720 : 1540) : (reduced ? 120 : 410);
+function oneCellComebackBeats(
+  gem: GemId, reduced: boolean, scenario: EffectTurnScenario,
+): readonly Beat[] {
+  const roll = reduced ? 720 : 1540;
   const stop = roll + (reduced ? 0 : TUMBLE_DURATION);
   const opening: Beat[] = [
     { at: 0, cue: 'start' },
     { at: roll, cue: 'roll' },
     { at: stop, cue: 'roll-stop' },
   ];
-  if (!comeback) {
-    return scenario.rerollTargets(request.params.gem).length
-      ? [...opening, { at: stop + 1020, cue: 'finish' }]
-      : [...opening, { at: stop + 850, cue: 'handoff' }, { at: stop + 1590, cue: 'finish' }];
-  }
-  if (request.params.gem !== scenario.comebackGem) return [...opening, { at: stop + 1000, cue: 'finish' }];
+  if (gem !== scenario.comebackGem) return [...opening, { at: stop + 1000, cue: 'finish' }];
 
   const flight = stop + (reduced ? 280 : 660);
   const place = flight + (reduced ? 200 : 575);
@@ -178,8 +168,7 @@ function lossBeats(paidPoints: number, reduced: boolean): readonly Beat[] {
 export function beatsFor(request: EffectRequest, reduced: boolean, scenario: EffectTurnScenario) {
   switch (request.kind) {
     case 'ONE_CELL_COMEBACK':
-    case 'REROLL_THROW':
-      return turnBeats(request, reduced, scenario);
+      return oneCellComebackBeats(request.params.gem, reduced, scenario);
     case 'DICE_STOP':
       return reduced ? quietDice : timeline.DICE_STOP;
     case 'TURN_CHANGE':
@@ -234,7 +223,6 @@ export function readEffect(kind: unknown, params: unknown, context?: EffectTarge
   switch (kind) {
     case 'DICE_STOP':
     case 'ONE_CELL_COMEBACK':
-    case 'REROLL_THROW':
       return { kind, params: { gem: readGem(params.gem) } };
     case 'GEM_PLACEMENT':
       return { kind, params: { gem: readGem(params.gem), target: readTarget(params.target, context?.board) } };

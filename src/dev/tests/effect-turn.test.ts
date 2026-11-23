@@ -6,7 +6,7 @@ import { beatsFor, lossCoins, lossLabel, readEffect, turnLabel } from '../../fea
 import type { Cue, EffectKind } from '../../features/effects/model/effect-model';
 import {
   COMEBACK_BOARD, COMEBACK_GEM, COMEBACK_SCORE, CURRENT_PLAYER, LAST_CELL,
-  rerollTargets, REROLL_RESULTS, TURN_PLAYERS,
+  TURN_PLAYERS,
 } from '../preview-data/effect-turn';
 import { EFFECT_PREVIEW_SCENARIO } from '../preview-data/effect-turn';
 import { SAMPLE_BOARD } from '../preview-data/sample-board';
@@ -89,22 +89,6 @@ test('the observed roll stop fires once and placement precedes reuse of the COME
   assert.equal(player.getSnapshot()?.phase, 'finish');
 });
 
-test('reroll targets the leftmost playable empty cells and passes only when none match', () => {
-  assert.deepEqual(rerollTargets(REROLL_RESULTS.available), [
-    { rowId: 'twenty', columnId: 'ruby' }, { rowId: 'ten', columnId: 'ruby' }, { rowId: 'penalty', columnId: 'ruby' },
-  ]);
-  assert.deepEqual(rerollTargets(REROLL_RESULTS.blocked), []);
-  for (const gem of Object.values(REROLL_RESULTS)) {
-    const { player, advance, sounded } = playbackFixture();
-    player.play(readEffect('REROLL_THROW', { gem }), true);
-    assert.deepEqual(sounded[0], ['REROLL_THROW', 'start']);
-    advance(4_000);
-    assert.equal(player.getSnapshot()?.phase, 'finish');
-    assert.ok(player.getSnapshot()?.cues.has('roll-stop'));
-    assert.equal(player.getSnapshot()?.cues.has('handoff'), gem === REROLL_RESULTS.blocked);
-  }
-});
-
 test('a missed amethyst never places or activates COMEBACK, and a stale roll cannot affect a replacement', () => {
   const { player, advance, sounded } = playbackFixture();
   const miss = readEffect('ONE_CELL_COMEBACK', { gem: 'sapphire' });
@@ -117,7 +101,7 @@ test('a missed amethyst never places or activates COMEBACK, and a stale roll can
   const previous = player.getSnapshot();
   assert.ok(previous);
   advance(4_500);
-  player.play(readEffect('REROLL_THROW', { gem: REROLL_RESULTS.available }), false);
+  player.play(readEffect('TURN_CHANGE', { playerName: 'PLAYER 2', isLocal: false }), false);
   player.settleRoll(previous.id);
   assert.equal(player.getSnapshot()?.phase, 'start');
   player.skip();

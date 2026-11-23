@@ -8,7 +8,6 @@ export interface EffectsAudio extends EffectAudio {
 }
 
 interface DemoOptions {
-  reroll?: 'available' | 'blocked';
   otherTurn?: boolean;
   noPayment?: boolean;
 }
@@ -50,7 +49,7 @@ export function createEffectsRuntime({
       void preloadDice().then(start, start);
       return;
     }
-    if (request.kind === 'ONE_CELL_COMEBACK' || request.kind === 'REROLL_THROW') {
+    if (request.kind === 'ONE_CELL_COMEBACK') {
       void preloadDice().catch(() => undefined);
     }
     start();
@@ -66,7 +65,6 @@ export function createEffectsRuntime({
 
   function playDemo(kind: EffectKind, options: DemoOptions = {}) {
     let params = scenario.demo[kind];
-    if (kind === 'REROLL_THROW') params = { gem: scenario.turn.rerollResults[options.reroll ?? 'available'] };
     if (kind === 'TURN_CHANGE' && options.otherTurn) params = { playerName: scenario.turn.nextPlayer.name, isLocal: false };
     if (kind === 'LOSS_NOTICE' && options.noPayment) params = { ...scenario.demo.LOSS_NOTICE, paidPoints: 0 };
     startPlayback(read(kind, params));

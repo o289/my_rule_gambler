@@ -213,12 +213,10 @@ export function EffectScene({ playback, stage, scenario, settleRoll, onRoll }: S
     case 'ONE_CELL_COMEBACK': {
       const ranking = request.params.gem === scenario.turn.comebackGem && reached(playback, 'comeback');
       return <>
-        <TurnScene playback={playback} request={request} stage={stage} scenario={scenario.turn} settleRoll={settleRoll} ranking={ranking} />
+        <TurnScene playback={playback} gem={request.params.gem} stage={stage} scenario={scenario.turn} settleRoll={settleRoll} ranking={ranking} />
         {ranking && <ComebackEffect playback={playback} params={scenario.turn.comebackRank} stage={stage} />}
       </>;
     }
-    case 'REROLL_THROW':
-      return <TurnScene playback={playback} request={request} stage={stage} scenario={scenario.turn} settleRoll={settleRoll} />;
     case 'TURN_CHANGE': return <TurnChangeEffect playback={playback} params={request.params} scenario={scenario} onRoll={onRoll} />;
     case 'LOSS_NOTICE': return <LossNoticeEffect playback={playback} params={request.params} scenario={scenario} />;
     case 'COMEBACK': return <ComebackEffect playback={playback} params={request.params} stage={stage} />;
@@ -233,8 +231,6 @@ export function outcome({ kind, params }: EffectRequest, scenario: EffectScenari
     case 'BIG_WIN': return `${params.playerName}　+${params.points.toLocaleString('ja-JP')}点`;
     case 'ONE_CELL_COMEBACK':
       return params.gem === scenario.turn.comebackGem ? `${scenario.turn.comebackRank.playerName}　${scenario.turn.comebackRank.fromRank}位 → ${scenario.turn.comebackRank.toRank}位` : `${GEMS[params.gem].name}　逆転ならず`;
-    case 'REROLL_THROW':
-      return scenario.turn.rerollTargets(params.gem).length ? `${GEMS[params.gem].name}を配置可能` : `配置できるマスなし · ${turnLabel({ playerName: scenario.turn.nextPlayer.name, isLocal: false })}`;
     case 'TURN_CHANGE': return turnLabel(params);
     case 'LOSS_NOTICE': return `${params.playerName}　${lossLabel(params.paidPoints)}`;
     case 'COMEBACK': return `${params.playerName}　${params.fromRank}位 → ${params.toRank}位`;
@@ -243,5 +239,5 @@ export function outcome({ kind, params }: EffectRequest, scenario: EffectScenari
 }
 
 export const EFFECT_ICONS: Record<EffectKind, string> = {
-  DICE_STOP: '◇', GEM_PLACEMENT: '◈', BIG_WIN: '✦', ONE_CELL_COMEBACK: '◆', REROLL_THROW: '↻', TURN_CHANGE: '♔', LOSS_NOTICE: '−', COMEBACK: 'ϟ', JACKPOT_VICTORY: '♛',
+  DICE_STOP: '◇', GEM_PLACEMENT: '◈', BIG_WIN: '✦', ONE_CELL_COMEBACK: '◆', TURN_CHANGE: '♔', LOSS_NOTICE: '−', COMEBACK: 'ϟ', JACKPOT_VICTORY: '♛',
 };

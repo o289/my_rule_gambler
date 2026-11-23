@@ -1,7 +1,5 @@
 import { SAMPLE_BOARD } from './sample-board';
-import { initialState, nextOpenCell, requiredGemAt } from '../../features/board/model/board-model';
 import type { BoardDefinition, CellAddress } from '../../features/board/model/board-model';
-import type { GemId } from '../../features/board/model/gems';
 import type { EffectParams, EffectScenario } from '../../features/effects/model/effect-model';
 
 export const LAST_CELL: CellAddress = { rowId: 'royal', columnId: 'amethyst' };
@@ -30,25 +28,11 @@ export const TURN_COMEBACK_RANK = {
   toRank: 1,
 };
 
-export const RETAINED_GEM: GemId = 'emerald';
-export const REROLL_RESULTS = { available: 'ruby', blocked: 'diamond' } as const;
-const rerollInitialBoard = initialState(SAMPLE_BOARD);
-
-export function rerollTargets(gem: GemId): readonly CellAddress[] {
-  const targets: CellAddress[] = [];
-  for (const row of SAMPLE_BOARD.rows) {
-    const open = nextOpenCell(SAMPLE_BOARD, rerollInitialBoard.occupied, row.id);
-    if (open && requiredGemAt(SAMPLE_BOARD, open) === gem) targets.push(open);
-  }
-  return targets;
-}
-
 export const DEMO: EffectParams = {
   DICE_STOP: { gem: 'sapphire' },
   GEM_PLACEMENT: { gem: 'amethyst', target: LAST_CELL },
   BIG_WIN: { playerName: 'PLAYER 1', points: 100, target: LAST_CELL },
   ONE_CELL_COMEBACK: { gem: COMEBACK_GEM },
-  REROLL_THROW: { gem: REROLL_RESULTS.available },
   TURN_CHANGE: { playerName: CURRENT_PLAYER.name, isLocal: true },
   LOSS_NOTICE: { playerName: CURRENT_PLAYER.name, paidPoints: 10, target: { rowId: 'penalty', columnId: 'ruby' } },
   COMEBACK: { playerName: 'PLAYER 1', opponents: ['PLAYER 2', 'PLAYER 3'], fromRank: 3, toRank: 1 },
@@ -60,7 +44,6 @@ export const EFFECT_PREVIEW_SCENARIO: EffectScenario = {
   featuredCell: LAST_CELL,
   demo: DEMO,
   turn: {
-    board: SAMPLE_BOARD,
     comebackBoard: COMEBACK_BOARD,
     lastCell: LAST_CELL,
     comebackGem: COMEBACK_GEM,
@@ -69,8 +52,5 @@ export const EFFECT_PREVIEW_SCENARIO: EffectScenario = {
     currentPlayer: CURRENT_PLAYER,
     nextPlayer: NEXT_PLAYER,
     comebackRank: TURN_COMEBACK_RANK,
-    retainedGem: RETAINED_GEM,
-    rerollResults: REROLL_RESULTS,
-    rerollTargets,
   },
 };

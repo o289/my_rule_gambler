@@ -165,16 +165,10 @@ export class SoundManager implements EffectAudio {
         if (cue === 'glow') this.goldChime(at, .056);
         break;
       case 'ONE_CELL_COMEBACK':
-      case 'REROLL_THROW':
-        if (cue === 'start' && effect === 'REROLL_THROW') {
-          this.burst(at, .077, .15, 2600, 'bandpass', .006);
-          this.tone({ at, frequency: 730, end: 443, gain: .11, length: .107, type: 'triangle' });
-        }
         if (cue === 'roll' && !reduced) this.rollSound(at);
         if (cue === 'roll-stop') this.weight(at, .19, .19);
         if (cue === 'flight' && !reduced) this.tone({ at, length: .53, frequency: 310, end: 790, gain: .052, attack: .28 });
         if (cue === 'place') this.goldChime(at, .052);
-        if (cue === 'handoff') this.goldChime(at, .045);
         break;
       case 'GEM_PLACEMENT':
         if (cue === 'flight') this.tone({ at, length: .53, frequency: 310, end: 790, gain: .052, attack: .28 });

@@ -13,7 +13,7 @@ import './board-score/score-effect.css';
 import { playableColumns } from '../../board/model/board-model';
 import type { BoardAward } from '../../board/model/board-model';
 
-const keys: EffectKind[] = ['DICE_STOP', 'GEM_PLACEMENT', 'BIG_WIN', 'COMEBACK', 'JACKPOT_VICTORY', 'ONE_CELL_COMEBACK', 'REROLL_THROW', 'TURN_CHANGE', 'LOSS_NOTICE'];
+const keys: EffectKind[] = ['DICE_STOP', 'GEM_PLACEMENT', 'BIG_WIN', 'COMEBACK', 'JACKPOT_VICTORY', 'ONE_CELL_COMEBACK', 'TURN_CHANGE', 'LOSS_NOTICE'];
 
 function App({ runtime }: { runtime: EffectsRuntime }) {
   useAudioActivation(runtime.audio.unlock);
@@ -21,7 +21,6 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
   const stage = useRef<HTMLDivElement>(null);
   const scenario = runtime.scenario;
   const current = playback?.request.kind;
-  const [reroll, setReroll] = useState<'available' | 'blocked'>('available');
   const [otherTurn, setOtherTurn] = useState(false);
   const [noPayment, setNoPayment] = useState(false);
   const [scoreAward, setScoreAward] = useState<BoardAward | null>(null);
@@ -76,7 +75,7 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
     setScoreAward(null);
     setScoreResult(null);
     showStage();
-    runtime.playDemo(kind, { reroll, otherTurn, noPayment });
+    runtime.playDemo(kind, { otherTurn, noPayment });
   }
 
   return (
@@ -127,16 +126,9 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
               <Fragment key={kind}>
                 <button type="button" data-effect-button={kind} aria-pressed={current === kind} onClick={() => playDemo(kind)}>
                   <span className="effect-icon" aria-hidden="true">{EFFECT_ICONS[kind]}</span>
-                  <span>{EFFECT_LABELS[kind]}{kind === 'REROLL_THROW' && <small>続ける</small>}</span>
+                  <span>{EFFECT_LABELS[kind]}</span>
                   <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true"><path d="m4 2 5 4-5 4Z" fill="currentColor" /></svg>
                 </button>
-                {kind === 'REROLL_THROW' && <label className="effect-setting">
-                  振り直しの結果
-                  <select value={reroll} onChange={event => setReroll(event.currentTarget.value === 'blocked' ? 'blocked' : 'available')}>
-                    <option value="available">配置先あり</option>
-                    <option value="blocked">配置先なし</option>
-                  </select>
-                </label>}
                 {kind === 'TURN_CHANGE' && <label className="effect-setting">
                   表示場面
                   <select value={otherTurn ? 'other' : 'local'} onChange={event => setOtherTurn(event.currentTarget.value === 'other')}>
