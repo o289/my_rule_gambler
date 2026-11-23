@@ -1,9 +1,25 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { cellKey, nextOpenCell, requiredGemAt } from '../../../../features/board/model/board-model';
 import { createGoalBoard } from '../../../../features/board/model/goal-layout';
-import { DEFAULT_CONFIG } from '../../../../shared/contracts/dice';
-import type { ClientMessage, Frame, GameState, Placement, RollConfig, RollKind, RollView, ServerMessage } from '../../../../shared/contracts/dice';
+import type { ClientMessage, Frame, GameState, RollKind, RollView, ServerMessage } from '../../../../shared/contracts/dice';
 import { PhysicsRoll } from '../../../../features/dice/server/physics';
+import {
+  beginRoll,
+  canConfigure,
+  createDiceRollRequest,
+  confirmRoll,
+  finishRoll,
+  finishTurn,
+  hasLegalPlacement,
+  hasTurn,
+  initialDiceGameState,
+  placeDie,
+  selectTurnAfterPrune,
+  setFirstTurn,
+  setRollConfig,
+  endTurnStatus,
+} from '../../../server/core/dice-game';
+import type { DiceGamePlayer } from '../../../server/core/dice-game';
+import { reconnectGraceExpired, roomGraceExpired } from '../../../server/core/participant-lifecycle';
 import { RollRunner } from './roll-runner';
 
 export const SESSION_GRACE_MS = 90_000;
@@ -28,36 +44,25 @@ type Command = Exclude<ClientMessage, { type: 'join' }>;
 
 export class DiceRoom {
   private members: Member[] = [];
-  private turnId: string | null = null;
-  private phase: GameState['phase'] = 'ready';
-  private revision = 0;
-  private config: RollConfig = { ...DEFAULT_CONFIG };
+  private game = initialDiceGameState();
   private roll: RollView | null = null;
   private runner: RollRunner | null = null;
-  private results: GameState['results'] = [];
-  private remaining: string[] = [];
-  private placedThisRoll = false;
   private readonly boardSeed = randomBytes(4).readUInt32LE();
   private readonly definition = createGoalBoard(this.boardSeed);
-  private readonly board = new Map<string, Placement>();
   private lastOccupiedAt = Date.now();
 
   constructor(private readonly allowDev: boolean) {}
 
   private hasLegalPlacement() {
-    const remaining = this.results.filter(die => this.remaining.includes(die.id));
-    return this.definition.rows.some(row => {
-      const open = nextOpenCell(this.definition, this.board, row.id);
-      return open && remaining.some(die => die.gem === requiredGemAt(this.definition, open));
-    });
+    return hasLegalPlacement(this.definition, this.game);
   }
 
   private state(): GameState {
     return {
       seats: this.members.map(member => ({ id: member.id, name: member.name, online: member.peer !== null })),
-      turnId: this.turnId, phase: this.phase, revision: this.revision, config: this.config,
-      boardSeed: this.boardSeed, placements: [...this.board.values()], results: this.results, remaining: this.remaining,
-      placedThisRoll: this.placedThisRoll, hasLegalPlacement: this.hasLegalPlacement(),
+      turnId: this.game.turnId, phase: this.game.phase, revision: this.game.revision, config: this.game.config,
+      boardSeed: this.boardSeed, placements: [...this.game.board.values()], results: this.game.results, remaining: this.game.remaining,
+      placedThisRoll: this.game.placedThisRoll, hasLegalPlacement: this.hasLegalPlacement(),
     };
   }
 
@@ -95,7 +100,7 @@ export class DiceRoom {
     prior?.close();
     member.leftAt = null;
     member.dev = this.allowDev && dev === true;
-    this.turnId ??= member.id;
+    this.game = setFirstTurn(this.game, member.id);
     this.lastOccupiedAt = Date.now();
 
     peer.send({
@@ -117,14 +122,12 @@ export class DiceRoom {
   }
 
   prune(now: number) {
-    if (this.members.every(member => !member.peer)) return now - this.lastOccupiedAt >= SESSION_GRACE_MS;
-    const remaining = this.members.filter(member => member.peer || member.leftAt === null || now - member.leftAt < SESSION_GRACE_MS);
+    if (this.members.every(member => !member.peer)) return roomGraceExpired(this.lastOccupiedAt, now, SESSION_GRACE_MS);
+    const remaining = this.members.filter(member => member.peer || !reconnectGraceExpired(member.leftAt, now, SESSION_GRACE_MS));
     if (remaining.length === this.members.length) return false;
     this.members = remaining;
-    if (!this.members.some(member => member.id === this.turnId)) {
-      this.turnId = remaining.find(member => member.peer)?.id ?? null;
-      this.revision += 1;
-    }
+    const players: DiceGamePlayer[] = remaining.map(member => ({ id: member.id, online: member.peer !== null }));
+    this.game = selectTurnAfterPrune(this.game, players);
     this.update();
     return false;
   }
@@ -134,23 +137,24 @@ export class DiceRoom {
   }
 
   private verifyTurn(member: Member, peer: RoomPeer) {
-    if (member.id === this.turnId) return true;
+    if (hasTurn(this.game, member.id)) return true;
     this.error(peer, 'TURN', '手番プレイヤーが操作できます。');
     return false;
   }
 
   private startRoll(kind: RollKind) {
-    const previous = kind === 'reroll' ? this.roll?.latest.dice.filter(die => this.remaining.includes(die.id)) ?? [] : [];
-    const ids = kind === 'initial' ? Array.from({ length: this.config.count }, (_, index) => `die-${index + 1}`) : previous.map(die => die.id);
-    if (!ids.length) return;
+    const previous = kind === 'reroll' ? this.roll?.latest.dice.filter(die => this.game.remaining.includes(die.id)) ?? [] : [];
     const id = randomUUID();
-    const config = { count: ids.length, hz: this.config.hz };
+    const started = beginRoll(this.game, id, kind, this.game.config.count, previous);
+    const ids = started.diceIds;
+    if (!ids.length) return;
+    const config = { count: ids.length, hz: this.game.config.hz };
     const physics = new PhysicsRoll({ rollId: id, kind, ids, hz: config.hz });
+    this.game = started.state;
     this.roll = {
       id, kind, config, previous, latest: physics.frame(),
       results: [], confirmed: false, nudges: 0, deadline: false,
     };
-    this.phase = 'rolling';
     this.update();
     this.runner = new RollRunner(physics, config.hz, config.count, {
       frame: frame => this.capture(id, frame),
@@ -158,7 +162,7 @@ export class DiceRoom {
       finished: frame => {
         if (this.roll?.id !== id) return;
         this.roll = { ...this.roll, latest: frame, results: physics.results, nudges: physics.nudgeCount, deadline: physics.deadline };
-        this.phase = 'confirm';
+        this.game = finishRoll(this.game, id);
         this.runner = null;
         this.update();
       },
@@ -179,13 +183,11 @@ export class DiceRoom {
     if (message.type === 'confirm') {
       if (this.roll?.id !== message.rollId || !this.roll.results.length) return;
       member.viewedRoll = message.rollId;
-      if (member.id !== this.turnId || this.roll.confirmed) return;
-      this.roll.confirmed = true;
-      this.results = this.roll.results;
-      this.remaining = this.results.map(die => die.id);
-      this.placedThisRoll = false;
-      this.phase = 'placement';
-      this.revision += 1;
+      if (this.roll.confirmed) return;
+      const next = confirmRoll(this.game, member.id, message.rollId, this.roll.results);
+      if (!next) return;
+      this.game = next;
+      this.roll = { ...this.roll, confirmed: true };
       this.update();
       return;
     }
@@ -194,65 +196,54 @@ export class DiceRoom {
 
     switch (message.type) {
       case 'config':
-        if (!member.dev || (this.phase !== 'ready' && this.phase !== 'placement')) {
+        if (!canConfigure(this.game, member.dev)) {
           this.error(peer, 'CONFIG', '開発設定はロールの開始前に変更できます。');
           return;
         }
-        this.config = message.config;
+        this.game = setRollConfig(this.game, message.config);
         this.update();
         return;
       case 'roll':
       case 'reroll': {
-        if (member.seen.has(message.requestId)) return;
-        if ((message.type === 'roll' && this.phase !== 'ready')
-          || (message.type === 'reroll' && (this.phase !== 'placement' || !this.remaining.length))) {
+        const kind = message.type === 'roll' ? 'initial' : 'reroll';
+        const decision = createDiceRollRequest(this.game, member.id, kind, message.requestId, member.seen, member.dev);
+        if (decision.status === 'duplicate') return;
+        if (decision.status === 'turn') {
+          this.error(peer, 'TURN', '手番プレイヤーが操作できます。');
+          return;
+        }
+        if (decision.status === 'phase') {
           this.error(peer, 'PHASE', '現在の状態では振れません。');
           return;
         }
-        if (message.type === 'reroll' && !this.placedThisRoll && !member.dev) {
+        if (decision.status === 'place-first') {
           this.error(peer, 'PLACE_FIRST', 'このロールで1個以上配置すると、残りを振り直せます。');
           return;
         }
-        member.seen.add(message.requestId);
-        if (member.seen.size > 48) {
-          const first = member.seen.values().next().value;
-          if (first) member.seen.delete(first);
-        }
-        this.startRoll(message.type === 'roll' ? 'initial' : 'reroll');
+        member.seen = decision.seen;
+        this.startRoll(kind);
         return;
       }
       case 'place': {
-        if (this.phase !== 'placement' || this.roll?.id !== message.rollId || !this.remaining.includes(message.dieId)) return;
-        const die = this.results.find(item => item.id === message.dieId);
-        if (!die) return;
-        const row = this.definition.rows[message.row];
-        const open = row && nextOpenCell(this.definition, this.board, row.id);
-        const column = this.definition.columns.findIndex(item => item.id === open?.columnId);
-        if (!open || requiredGemAt(this.definition, open) !== die.gem
-          || (message.column !== undefined && column !== message.column)) {
+        const result = placeDie(this.game, this.definition, message);
+        if (result.status === 'ignored') return;
+        if (result.status === 'invalid') {
           this.error(peer, 'CELL', '行の左端の空きマスに、指定と同じ宝石のダイスを置けます。');
           return;
         }
-        this.board.set(cellKey(open), { row: message.row, column, gem: die.gem });
-        this.remaining = this.remaining.filter(id => id !== die.id);
-        this.placedThisRoll = true;
-        this.revision += 1;
+        this.game = result.state;
         this.update();
         return;
       }
       case 'end-turn': {
-        if (this.phase !== 'placement' || message.revision !== this.revision) return;
-        if (this.hasLegalPlacement() && !this.placedThisRoll) {
+        const status = endTurnStatus(this.game, this.definition, message.revision);
+        if (status === 'ignored') return;
+        if (status === 'place-first') {
           this.error(peer, 'PLACE_FIRST', '置けるダイスがあるときは1個以上配置してください。');
           return;
         }
-        const start = this.members.findIndex(item => item.id === member.id);
-        const next = this.members.slice(start + 1).concat(this.members.slice(0, start + 1)).find(item => item.peer);
-        this.turnId = next?.id ?? member.id;
-        this.phase = 'ready';
-        this.remaining = [];
-        this.placedThisRoll = false;
-        this.revision += 1;
+        const players: DiceGamePlayer[] = this.members.map(item => ({ id: item.id, online: item.peer !== null }));
+        this.game = finishTurn(this.game, players, member.id);
         this.update();
         return;
       }

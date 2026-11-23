@@ -1,6 +1,16 @@
 import { randomBytes, randomUUID } from 'node:crypto';
-import { COUNTDOWN_MS, MAX_PLAYERS, MIN_PLAYERS } from '../../../../shared/contracts/casino-entry';
+import { COUNTDOWN_MS, MAX_PLAYERS } from '../../../../shared/contracts/casino-entry';
 import type { CasinoRoomInfo, ClientMessage, LobbyState, Seat, ServerMessage } from '../../../../shared/contracts/casino-entry';
+import {
+  cancelLobbyCountdown,
+  createLobbyState,
+  initialLobbyCountdownState,
+  resolveLobbyCountdown,
+  scheduleLobbyCountdown,
+  updateLobbyReady,
+} from '../../../server/core/lobby';
+import type { LobbyCountdownState } from '../../../server/core/lobby';
+import { availableSeatSlot, reconnectGraceExpired, roomGraceExpired } from '../../../server/core/participant-lifecycle';
 
 export const SESSION_GRACE_MS = 90_000;
 
@@ -21,54 +31,50 @@ export class CasinoRoom {
   private members: Member[] = [];
   private lastOccupiedAt = Date.now();
   private countdown: ReturnType<typeof setTimeout> | null = null;
-  private startAt: number | null = null;
-  private started = false;
-  private startedPlayers: Seat[] | null = null;
+  private countdownState: LobbyCountdownState = initialLobbyCountdownState();
 
   constructor(readonly info: CasinoRoomInfo, private readonly countdownMs = COUNTDOWN_MS) {}
 
   get empty() { return this.members.length === 0; }
 
-  private eligible() {
-    const online = this.members.filter(member => member.peer);
-    return online.length >= MIN_PLAYERS && online.every(member => member.ready);
+  private participants() {
+    return this.members.map(({ id, name, slot, ready, peer }) => ({ id, name, slot, ready, online: peer !== null }));
   }
 
   private cancelCountdown() {
-    if (!this.countdown) return false;
-    clearTimeout(this.countdown);
+    const active = this.countdownState.startAt !== null;
+    if (this.countdown) clearTimeout(this.countdown);
     this.countdown = null;
-    this.startAt = null;
-    return true;
+    this.countdownState = cancelLobbyCountdown(this.countdownState);
+    return active;
   }
 
   private checkReady() {
-    if (this.started || this.countdown || !this.eligible()) return;
-    this.startAt = Date.now() + this.countdownMs;
+    const next = scheduleLobbyCountdown(this.countdownState, this.participants(), Date.now(), this.countdownMs);
+    if (next === this.countdownState) return;
+    this.countdownState = next;
+    this.scheduleCountdownTimer(next.generation, this.countdownMs);
+  }
+
+  private scheduleCountdownTimer(generation: number, delay: number) {
     const countdown = setTimeout(() => {
       if (this.countdown !== countdown) return;
-      this.cancelCountdown();
-      this.started = this.eligible();
-      if (this.started) {
-        this.startedPlayers = this.members
-          .filter(member => member.peer !== null)
-          .sort((a, b) => a.slot - b.slot)
-          .map(member => ({ id: member.id, name: member.name, slot: member.slot, ready: member.ready, online: true }));
+      const resolution = resolveLobbyCountdown(this.countdownState, this.participants(), generation, Date.now());
+      if (resolution.status === 'early') {
+        this.countdown = null;
+        this.scheduleCountdownTimer(generation, resolution.remainingMs);
+        return;
       }
+      if (resolution.status === 'stale') return;
+      this.countdown = null;
+      this.countdownState = resolution.state;
       this.update();
-    }, this.countdownMs);
+    }, Math.max(1, delay));
     this.countdown = countdown;
   }
 
   private state(): LobbyState {
-    return {
-      seats: this.members.map(({ id, name, slot, ready, peer }) => ({ id, name, slot, ready, online: peer !== null })),
-      startedPlayers: this.startedPlayers?.map(seat => ({ ...seat })) ?? null,
-      phase: this.started ? 'started' : this.countdown ? 'countdown' : 'waiting',
-      hostId: this.members.find(member => member.peer)?.id ?? null,
-      startAt: this.startAt,
-      serverTime: Date.now(),
-    };
+    return createLobbyState(this.participants(), this.countdownState, Date.now());
   }
 
   private update() {
@@ -83,7 +89,7 @@ export class CasinoRoom {
       return null;
     }
     if (!member) {
-      if (this.started) {
+      if (this.countdownState.startedPlayers !== null) {
         peer.send({ type: 'error', code: 'STARTED', message: 'このルームはすでにゲームを開始しています。' });
         return null;
       }
@@ -91,8 +97,8 @@ export class CasinoRoom {
         peer.send({ type: 'error', code: 'FULL', message: 'このルームの定員は6名です。' });
         return null;
       }
-      const slot = Array.from({ length: MAX_PLAYERS }, (_, index) => index).find(index => !this.members.some(item => item.slot === index));
-      if (slot === undefined) return null;
+      const slot = availableSeatSlot(this.members, MAX_PLAYERS);
+      if (slot === null) return null;
       member = { id: randomUUID(), name: `PLAYER ${slot + 1}`, slot, ready: false, token: randomBytes(24).toString('base64url'), peer: null, leftAt: null };
       this.members.push(member);
     }
@@ -129,8 +135,8 @@ export class CasinoRoom {
   }
 
   prune(now: number) {
-    if (this.members.every(member => !member.peer)) return now - this.lastOccupiedAt >= SESSION_GRACE_MS;
-    const remaining = this.members.filter(member => member.peer || member.leftAt === null || now - member.leftAt < SESSION_GRACE_MS);
+    if (this.members.every(member => !member.peer)) return roomGraceExpired(this.lastOccupiedAt, now, SESSION_GRACE_MS);
+    const remaining = this.members.filter(member => member.peer || !reconnectGraceExpired(member.leftAt, now, SESSION_GRACE_MS));
     if (remaining.length !== this.members.length) {
       this.members = remaining;
       this.update();
@@ -147,9 +153,10 @@ export class CasinoRoom {
       return;
     }
 
-    if (this.started || member.ready === message.ready) return;
-    member.ready = message.ready;
-    if (!member.ready) this.cancelCountdown();
+    const members = updateLobbyReady(this.members, playerId, message.ready, this.countdownState.startedPlayers !== null);
+    if (!members) return;
+    this.members = members;
+    if (!message.ready) this.cancelCountdown();
     else this.checkReady();
     this.update();
   }

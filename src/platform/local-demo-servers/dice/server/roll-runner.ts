@@ -1,6 +1,7 @@
 import { CAPTURE_HZ } from '../../../../features/dice/model/geometry';
 import type { Frame, Metrics } from '../../../../shared/contracts/dice';
 import { PhysicsRoll } from '../../../../features/dice/server/physics';
+import { advanceRoll } from '../../../server/core/dice/roll-engine';
 
 interface RollEvents {
   frame(frame: Frame): boolean;
@@ -50,31 +51,28 @@ export class RollRunner {
 
   private tick() {
     const now = performance.now();
-    this.accumulator = Math.min(160, this.accumulator + now - this.lastTick);
+    const elapsed = now - this.lastTick;
     this.lastTick = now;
-    const dt = this.physics.dt * 1000;
-    while (this.accumulator + 1e-8 >= dt) {
-      this.accumulator -= dt;
+    const advance = advanceRoll(this.physics, this.accumulator, elapsed, this.hz, CAPTURE_HZ, step => {
       const start = performance.now();
-      this.physics.step();
+      step();
       const stepMs = performance.now() - start;
       this.stepCount += 1;
       this.sum += stepMs;
       this.peak = Math.max(this.peak, stepMs);
+    });
+    this.accumulator = advance.accumulatorMs;
+    for (const frame of advance.frames) {
+      if (this.callbacks.frame(frame)) this.sent += 1;
+    }
 
-      if (this.physics.settled) {
-        const frame = this.physics.frame();
-        if (this.callbacks.frame(frame)) this.sent += 1;
-        const stopped = performance.now();
-        this.sendMetrics(stopped, stopped - this.startedAt);
-        this.callbacks.finished(frame);
-        this.stop();
-        return;
-      }
-
-      if (this.physics.steps % (this.hz / CAPTURE_HZ) === 0) {
-        if (this.callbacks.frame(this.physics.frame())) this.sent += 1;
-      }
+    if (advance.finalFrame) {
+      if (this.callbacks.frame(advance.finalFrame)) this.sent += 1;
+      const stopped = performance.now();
+      this.sendMetrics(stopped, stopped - this.startedAt);
+      this.callbacks.finished(advance.finalFrame);
+      this.stop();
+      return;
     }
     if (now - this.measuredAt >= 800) this.sendMetrics(now, null);
   }

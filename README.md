@@ -55,8 +55,9 @@ npm run dev
 | --- | --- |
 | `src/features/dice/model/geometry.ts` と `src/shared/contracts/dice.ts` | トレイ寸法、宝石の面、通信データの型と検証 |
 | `src/features/dice/server/physics.ts` | Rapier の剛体・衝突・停止判定 |
-| `src/platform/local-demo-servers/dice/server/roll-runner.ts`、`room.ts` | 物理ロールの進行、フレーム配信、ルームと手番管理 |
-| `src/platform/local-demo-servers/dice/server/http.ts`、`src/platform/server/websocket.ts` | Hono の HTTP health、Room 接続と共通 WebSocket 制御 |
+| `src/platform/server/core/dice-game.ts`、`dice/roll-engine.ts` | ランタイム非依存の手番・配置ルールと固定ステップ進行 |
+| `src/platform/local-demo-servers/dice/server/room.ts`、`roll-runner.ts` | NodeデモのRoom接続、4ms実行、物理ロールとフレーム配信 |
+| `src/platform/local-demo-servers/dice/server/http.ts`、`src/platform/server/websocket.ts` | Hono の HTTP health、Room 接続とNode共通 WebSocket 制御 |
 | `src/features/dice/ui/3d/tray-scene.tsx` | 固定俯瞰のThree.jsトレイ、カップ、ダイス描画、受信間の補間 |
 | `src/features/dice/ui/connection.ts` | 既存 WebSocket デモの接続、再接続、クライアント状態 |
 | `src/features/dice/ui/main.tsx`、`monitor.tsx` | React の操作画面、確定した宝石と開発計測値 |
@@ -150,7 +151,8 @@ playBankTransaction({ type: 'withdraw', playerId: 'player-1', amount: 70, tender
 | `src/features/casino-entry/ui/casino-flow.tsx`、`room-chooser.tsx`、`casino-doors.tsx`、`casino.css` | 入場、ルーム選択、扉の開閉、VIP卓、座席、READY、カウントダウン、完了表示 |
 | `src/features/casino-entry/ui/casino-assets.ts`、`asset-loader.ts` | 初回の画像読み込み・デコード、進捗、失敗分の再試行 |
 | `src/features/casino-entry/ui/connection.ts`、`src/shared/contracts/casino-entry.ts` | ルーム作成・IDによる入室確認、同期、復帰、退出、開始席順の受け渡し |
-| `src/platform/local-demo-servers/casino-entry/server/room.ts`、`http.ts`、`src/platform/server/websocket.ts` | 入室、座席番号と準備状況、開始条件・開始時座席順の確定、共通 WebSocket 制御 |
+| `src/platform/server/core/lobby.ts`、`participant-lifecycle.ts` | ランタイム非依存のREADY・カウント期限・開始席順・再接続期限判定 |
+| `src/platform/local-demo-servers/casino-entry/server/room.ts`、`http.ts`、`src/platform/server/websocket.ts` | Nodeデモの入室、接続管理、メッセージ配信とロビーRoom |
 | `sound.ts` | クリック操作後に再生できる扉の金属音 |
 
 画面は読み込み完了後もボタンを押すまで閉じたままです。CSS 3Dの遠近法と左右の蝶番で入口と部屋の扉を奥へ回転させます。卓を操作できるのは部屋の扉が開き切ってからです。端末の視覚効果を減らす設定に従い、回転などを省略します。
@@ -177,9 +179,10 @@ playBankTransaction({ type: 'withdraw', playerId: 'player-1', amount: 70, tender
 - `src/features/` — ダイス、ボード、エフェクト、プレイヤー、カジノエントリー、バンク
 - `src/shared/assets/` — 共有素材
 - `src/shared/contracts/` — ダイスとカジノ入場の既存メッセージ形式
+- `src/platform/server/core/` — ランタイム非依存のロビー、ダイス規則、参加者期限、固定ステップ処理
 - `src/platform/server/websocket.ts` — Node サーバー共通の WebSocket 接続制御
 - `src/platform/local-demo-servers/` — ローカルデモ固有のサーバーと Room 管理
 - `src/dev/preview-data/` — デモ盤面などのサンプルデータ
-- `src/dev/tests/` — 既存の要素別テストソース（新しいテスト環境の設定・実行は今回の範囲外）
+- `src/dev/tests/` — 要素別・サーバー通信とcoreの回帰テスト
 
 各要素のソースは `src/features/<feature>/ui/` と `model/` を基本に分けています。既存のダイス物理は `src/features/dice/server/physics.ts` にあります。サンプル盤面と画面操作はデモ専用で、6要素間を通した正式なゲーム進行、得点処理、勝敗判定を実装するものではありません。
