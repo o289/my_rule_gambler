@@ -81,6 +81,11 @@ export interface Beat {
 
 export const TURN_CHANGE_DURATION_MS = 690;
 export const REDUCED_TURN_CHANGE_DURATION_MS = 200;
+export const CONVERGING_LIGHT_TRAVEL_MS = 985;
+export const CONVERGING_LIGHT_STAGGER_MS = 15;
+const bigWinGather = 510;
+const bigWinSilence = bigWinGather + CONVERGING_LIGHT_TRAVEL_MS + (GEM_IDS.length - 1) * CONVERGING_LIGHT_STAGGER_MS + 70;
+const bigWinImpact = bigWinSilence + 300;
 
 const timeline: Record<Exclude<EffectKind, 'ONE_CELL_COMEBACK' | 'BOARD_SCORE'>, readonly Beat[]> = {
   TURN_CHANGE: [
@@ -97,10 +102,10 @@ const timeline: Record<Exclude<EffectKind, 'ONE_CELL_COMEBACK' | 'BOARD_SCORE'>,
   BIG_WIN: [
     { at: 0, cue: 'start' },
     { at: 270, cue: 'focus' },
-    { at: 510, cue: 'gather' },
-    { at: 1430, cue: 'silence' },
-    { at: 1730, cue: 'impact' },
-    { at: 3780, cue: 'finish' },
+    { at: bigWinGather, cue: 'gather' },
+    { at: bigWinSilence, cue: 'silence' },
+    { at: bigWinImpact, cue: 'impact' },
+    { at: bigWinImpact + 2050, cue: 'finish' },
   ],
   COMEBACK: [
     { at: 0, cue: 'start' },

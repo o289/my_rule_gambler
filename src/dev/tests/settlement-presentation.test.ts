@@ -2,11 +2,13 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { BoardDefinition } from '../../features/board/model/board-model';
 import { cellKey } from '../../features/board/model/board-model';
-import { oneCellComebackHint, settlementFollowups, settlementRankChange } from '../../features/dice/model/settlement-presentation';
-import { settlementCoinMoves } from '../../features/bank/model/settlement-coins';
+import { oneCellComebackHint, settlementFollowups, settlementRankChange, settlementStages } from '../../features/dice/model/settlement-presentation';
+import { settlementCoinMoves, settlementPlaybackCoins } from '../../features/bank/model/settlement-coins';
+import { bankBalance, selectExchange, transferCoins } from '../../features/bank/model/bank-model';
 import { settlementEffects } from '../../features/effects/model/effect-model';
 import { SettlementEventQueue } from '../../features/dice/model/settlement-event-queue';
 import { acceptsGameState } from '../../features/dice/model/state-sync';
+import { rollPresentationAction } from '../../features/dice/model/roll-presentation';
 import type { GameState, MatchSettlementEvent } from '../../shared/contracts/dice';
 
 const board: BoardDefinition = {
@@ -87,6 +89,38 @@ test('score coin flights move exactly the committed amount without changing the 
   }
   const zeroBalanceLoss = event(0, { rowPoints: -10 });
   assert.equal(zeroBalanceLoss.points, 0, 'the score event keeps a zero actual payment distinct from its negative row value');
+});
+
+test('live settlement plays placement, score and bank before rank change or victory', () => {
+  const steps = (value: MatchSettlementEvent) => settlementStages(value, board).map(stage => stage.kind === 'effect' ? stage.request.kind : stage.kind);
+  assert.deepEqual(steps(event(100)), ['placement', 'score', 'BIG_WIN', 'bank', 'COMEBACK']);
+  assert.deepEqual(steps(event(-10)), ['placement', 'score', 'bank', 'COMEBACK']);
+  assert.deepEqual(steps(event(100, { gameEnded: true })), ['placement', 'score', 'bank', 'JACKPOT_VICTORY']);
+  const ranks = event(100).afterRanks;
+  assert.deepEqual(steps(event(0, { rowPoints: -10, beforeRanks: ranks })), ['placement', 'score']);
+  assert.deepEqual(steps(event(50, { beforeRanks: ranks })), ['placement', 'score', 'bank']);
+});
+
+test('bank playback reconstructs the scoring player balance and transfers only the confirmed points', () => {
+  for (const [scoreAfter, points] of [[90, -10], [0, -70], [130, 50]] as const) {
+    const { wallet, reserve } = settlementPlaybackCoins(scoreAfter, points);
+    const type = points < 0 ? 'withdraw' : 'deposit';
+    assert.equal(bankBalance(wallet), scoreAfter - points);
+    const { payment } = selectExchange(wallet, reserve, { type, playerId: 'p1', amount: Math.abs(points) });
+    assert.equal(bankBalance(payment), Math.abs(points));
+    assert.equal(bankBalance(transferCoins(wallet, reserve, type, payment).wallet), scoreAfter);
+  }
+});
+
+test('live dice stays in the main area until the result reveal and confirmation have both finished', () => {
+  const turn = { standard: true, complete: false, confirmed: false, own: true, reroll: false };
+  assert.equal(rollPresentationAction(turn), 'wait');
+  assert.equal(rollPresentationAction({ ...turn, confirmed: true, own: false }), 'wait');
+  assert.equal(rollPresentationAction({ ...turn, complete: true }), 'confirm');
+  assert.equal(rollPresentationAction({ ...turn, complete: true, reroll: true }), 'auto-confirm');
+  assert.equal(rollPresentationAction({ ...turn, complete: true, own: false }), 'wait');
+  assert.equal(rollPresentationAction({ ...turn, complete: true, confirmed: true, own: false }), 'show-board');
+  assert.equal(rollPresentationAction({ ...turn, complete: true, confirmed: true }), 'show-board');
 });
 
 test('settlement event queue suppresses duplicate receive and does not replay after reconnect baseline', () => {

@@ -34,7 +34,7 @@ test('settlement applies only the newly completed goal once and caps a loss at t
   const first = settleCompletedRows(board, occupied, state([20, 80]), 'p1', 'bonus');
   assert.equal(first.players[0]?.score, 40);
   assert.deepEqual(first.completedRows, ['bonus']);
-  assert.equal(first.result, null, '500 is not checked before every goal is full');
+  assert.equal(first.result, null, 'before 500, an unfinished board stays in play');
 
   const repeated = settleCompletedRows(board, occupied, first, 'p1', 'bonus');
   assert.equal(repeated.players[0]?.score, 40, 'a completed row cannot be paid twice');
@@ -51,29 +51,33 @@ test('settlement applies only the newly completed goal once and caps a loss at t
   assert.deepEqual(zeroBalanceLoss.completedRows, ['penalty'], 'a zero-payment loss is still settled once');
 });
 
-test('only a completed board decides 500-point victory and preserves tied highest players', () => {
+test('the first completed score to reach 500 ends a partially filled board', () => {
   const partial = new Map([[cellKey({ rowId: 'bonus', columnId: 'ruby' }), { row: 0, column: 0 }]]);
+  const below500 = settleCompletedRows(board, partial, state([479, 480]), 'p1', 'bonus');
+  assert.equal(below500.players[0]?.score, 499);
+  assert.equal(below500.result, null);
+
   const reached500 = settleCompletedRows(board, partial, state([480, 480]), 'p1', 'bonus');
   assert.equal(reached500.players[0]?.score, 500);
-  assert.equal(reached500.result, null, 'reaching 500 before the last goal does not end the game');
+  assert.deepEqual(reached500.result, { status: 'won', highestScore: 500, winners: ['p1'] });
+  assert.deepEqual(reached500.completedRows, ['bonus']);
+  assert.deepEqual([...rankPlayers(reached500.players).values()], [1, 2]);
+
+  const above500 = settleCompletedRows(board, partial, state([490, 480]), 'p1', 'bonus');
+  assert.deepEqual(above500.result, { status: 'won', highestScore: 510, winners: ['p1'] });
 
   const complete = new Map(partial).set(cellKey({ rowId: 'penalty', columnId: 'sapphire' }), { row: 1, column: 1 });
-  const final = settleCompletedRows(board, complete, reached500, 'p2', 'penalty');
-  assert.deepEqual(final.result, { status: 'won', highestScore: 500, winners: ['p1'] });
-  assert.deepEqual([...rankPlayers(final.players).values()], [1, 2]);
+  assert.equal(settleCompletedRows(board, complete, reached500, 'p2', 'penalty'), reached500,
+    'no later placements can change the finished match');
+});
 
+test('an already level top score is recorded as tied if a settlement reaches the victory threshold', () => {
+  const complete = new Set([cellKey({ rowId: 'bonus', columnId: 'ruby' })]);
   const tied = settleCompletedRows(board, complete, {
-    ...reached500,
-    players: [player('p1', 500), player('p2', 550), player('p3', 400)],
-  }, 'p2', 'penalty');
+    ...state([500, 480, 400]),
+  }, 'p2', 'bonus');
   assert.deepEqual(tied.result?.winners, ['p1', 'p2']);
   assert.deepEqual([...rankPlayers(tied.players).values()], [1, 1, 3]);
-
-  const lastPlacerLoses = settleCompletedRows(board, complete, {
-    ...reached500,
-    players: [player('p1', 600), player('p2', 551)],
-  }, 'p2', 'penalty');
-  assert.deepEqual(lastPlacerLoses.result?.winners, ['p1'], 'the player placing the last goal does not automatically win');
 });
 
 test('499 continues while 500 at board completion is a win', () => {

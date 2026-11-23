@@ -62,11 +62,9 @@ function CoinGroups({ wallet, renderCoin }: { wallet: readonly Coin[]; renderCoi
   );
 }
 
-export function PlayerTray({ snapshot, playerName, flightSources = [], flightTargets = [] }: {
+export function PlayerTray({ snapshot, playerName }: {
   snapshot: Pick<BankSnapshot, 'mode' | 'balance' | 'wallet' | 'run' | 'compression'>;
   playerName: string;
-  flightSources?: readonly Coin[];
-  flightTargets?: readonly Coin[];
 }) {
   const tray = useRef<HTMLDivElement>(null);
   const { wallet, balance, run, mode, compression } = snapshot;
@@ -124,13 +122,6 @@ export function PlayerTray({ snapshot, playerName, flightSources = [], flightTar
           );
         })}
         {gathering && animateMerge && <CoinMerger key={gathering.output.id} tray={tray} step={gathering} />}
-        {(flightSources.length > 0 || flightTargets.length > 0) && <div className="tray-flight-anchors" aria-hidden="true">
-          <CoinGroups wallet={[...flightSources, ...flightTargets]} renderCoin={coin => <div className="coin-anchor"
-            data-coin-id={flightSources.some(source => source.id === coin.id) ? coin.id : undefined}
-            data-flight-target={flightTargets.some(target => target.id === coin.id) ? coin.id : undefined} key={coin.id}>
-            <span className="coin-in-tray"><GoldCoin coin={coin} /></span>
-          </div>} />
-        </div>}
       </div>
     </section>
   );

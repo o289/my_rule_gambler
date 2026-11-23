@@ -47,16 +47,16 @@ export function settleCompletedRows(
     : player);
   completed.add(row.id);
 
+  const highestScore = Math.max(...players.map(player => player.score));
+  if (highestScore >= 500) {
+    return { players, completedRows: [...completed], result: {
+      status: 'won', highestScore, winners: players.filter(player => player.score === highestScore).map(player => player.id),
+    } };
+  }
   const roundComplete = definition.rows.every(row => {
     const rowGoal = goalColumn(definition, row);
     return rowGoal !== undefined && board.has(cellKey({ rowId: row.id, columnId: rowGoal.id }));
   });
-  let result: MatchResult | null = null;
-  if (roundComplete) {
-    const highestScore = Math.max(...players.map(player => player.score));
-    result = highestScore >= 500
-      ? { status: 'won', highestScore, winners: players.filter(player => player.score === highestScore).map(player => player.id) }
-      : { status: 'continue', highestScore, winners: [] };
-  }
+  const result: MatchResult | null = roundComplete ? { status: 'continue', highestScore, winners: [] } : null;
   return { players, completedRows: [...completed], result };
 }

@@ -75,14 +75,16 @@ export function BigWinEffect({ playback, params, stage, scenario, liveBoard }: S
   useLayoutEffect(() => {
     const cell = locateCell(targetBoard.current, target);
     if (cell && stage.current && focused) setFocusPoint(centerWithin(cell, stage.current));
-    if (liveBoard && cell && playback.phase !== 'start') cell.dataset.fxTarget = 'gold';
-    return () => { if (liveBoard && cell?.dataset.fxTarget === 'gold') delete cell.dataset.fxTarget; };
-  }, [stage, target, focused, liveBoard, playback.phase]);
+    if (!liveBoard || !cell || !focused) return;
+    cell.dataset.fxTarget = 'gold';
+    return () => { delete cell.dataset.fxTarget; };
+  }, [stage, target, targetBoard, focused, liveBoard]);
   return (
     <>
       {!liveBoard && <BoardScene viewportRef={board} definition={scenario.board} target={target} placed={gem} tone={playback.phase === 'start' ? undefined : 'gold'} />}
       <div className="big-vignette" aria-hidden="true" />
-      {!impact && <div className="big-charge" data-phase={playback.phase} style={focusPoint ? { left: focusPoint.x, top: focusPoint.y } : undefined} aria-hidden="true" />}
+      {!impact && (focusPoint || !liveBoard) && <div className="big-charge" data-phase={playback.phase}
+        style={focusPoint ? { left: focusPoint.x, top: focusPoint.y } : undefined} aria-hidden="true" />}
       {active && focusPoint && reached(playback, 'gather') && !reached(playback, 'silence') && <ConvergingLights stage={stage} board={targetBoard} target={focusPoint} />}
       {impact && (
         <div className="win-slate" data-animate={active} data-complete={!playback.playing}>

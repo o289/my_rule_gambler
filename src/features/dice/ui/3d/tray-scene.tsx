@@ -6,6 +6,7 @@ import { preloadDice } from '../face-canvases';
 import { DIE_BEVEL, DIE_SIZE, FACES, TRAY, releaseAt } from '../../model/geometry';
 import type { DiePose, RollView } from '../../../../shared/contracts/dice';
 import type { FrameStream } from '../connection';
+import { ROLL_RESULT_DISPLAY_MS } from '../../model/roll-presentation';
 
 const clamp = (value: number) => Math.max(0, Math.min(1, value));
 const smooth = (value: number) => { const t = clamp(value); return t * t * (3 - 2 * t); };
@@ -41,9 +42,10 @@ interface TrayOptions {
   fps: (value: number | null) => void;
   cupCue: () => void;
   error: (message: string) => void;
+  resultComplete: () => void;
 }
 
-function createTray({ host, stream, roll, fps, cupCue, error }: TrayOptions) {
+function createTray({ host, stream, roll, fps, cupCue, error, resultComplete }: TrayOptions) {
   const renderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: 'high-performance' });
   renderer.setPixelRatio(Math.min(devicePixelRatio, innerWidth <= 640 ? 1.1 : 1.25));
   renderer.shadowMap.enabled = true;
@@ -187,6 +189,7 @@ function createTray({ host, stream, roll, fps, cupCue, error }: TrayOptions) {
   let frames = 0;
   let resultAt = -Infinity;
   let resultRoll = '';
+  let completedRoll = '';
   let cupRoll = '';
   let previousTime = 0;
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
@@ -281,7 +284,11 @@ function createTray({ host, stream, roll, fps, cupCue, error }: TrayOptions) {
       frames = 0;
       fpsAt = now;
     }
-    if (!view.results.length || (!reduced.matches && now - resultAt < 1080)) invalidate();
+    if (!view.results.length || (!reduced.matches && now - resultAt < ROLL_RESULT_DISPLAY_MS)) invalidate();
+    else if (completedRoll !== view.id) {
+      completedRoll = view.id;
+      resultComplete();
+    }
   }
   observer.observe(host);
   resize();
@@ -303,7 +310,13 @@ function createTray({ host, stream, roll, fps, cupCue, error }: TrayOptions) {
   };
 }
 
-export default function TrayScene({ stream, roll, onFps, onCup }: { stream: FrameStream; roll: RollView; onFps: (fps: number | null) => void; onCup: () => void }) {
+export default function TrayScene({ stream, roll, onFps, onCup, onResultComplete }: {
+  stream: FrameStream;
+  roll: RollView;
+  onFps: (fps: number | null) => void;
+  onCup: () => void;
+  onResultComplete: () => void;
+}) {
   const node = useRef<HTMLDivElement>(null);
   const current = useRef(roll);
   const refresh = useRef<(() => void) | null>(null);
@@ -314,7 +327,7 @@ export default function TrayScene({ stream, roll, onFps, onCup }: { stream: Fram
     try {
       const renderer = createTray({
         host: node.current, stream, roll: () => current.current,
-        fps: onFps, cupCue: onCup, error: setProblem,
+        fps: onFps, cupCue: onCup, error: setProblem, resultComplete: onResultComplete,
       });
       refresh.current = renderer.invalidate;
       return () => {
@@ -324,7 +337,14 @@ export default function TrayScene({ stream, roll, onFps, onCup }: { stream: Fram
     } catch {
       setProblem('このブラウザでは3D表示を開始できませんでした。確定結果は下に表示します。');
     }
-  }, [stream, onFps, onCup]);
+  }, [stream, onFps, onCup, onResultComplete]);
+  const hasResults = roll.results.length > 0;
+  useEffect(() => {
+    if (!problem || !hasResults) return;
+    const duration = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : ROLL_RESULT_DISPLAY_MS;
+    const timer = window.setTimeout(onResultComplete, duration);
+    return () => window.clearTimeout(timer);
+  }, [problem, hasResults, onResultComplete]);
   return <div className="tray-visual" ref={node} aria-label="真上から見たサーバー同期ダイストレイ">
     {problem && <p className="tray-problem" role="status">{problem}</p>}
   </div>;

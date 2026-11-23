@@ -6,6 +6,7 @@ import type { BoardAward, BoardDefinition, CellAddress } from '../../board/model
 import { GEMS, GEM_IDS } from '../../board/model/gems';
 import type { GemId } from '../../board/model/gems';
 import { centerWithin } from './visuals';
+import { CONVERGING_LIGHT_STAGGER_MS, CONVERGING_LIGHT_TRAVEL_MS } from '../model/effect-model';
 import type { Point } from './visuals';
 
 const noSelection = () => undefined;
@@ -130,15 +131,16 @@ export function ConvergingLights({ stage, board, target }: {
       const point = centerWithin(origin, shell);
       const endX = target?.x ?? shell.clientWidth * .5;
       const endY = target?.y ?? shell.clientHeight * .46;
-      const middleX = endX + Math.cos((index / 6) * Math.PI * 2) * endX * .48;
-      const middleY = endY + Math.sin((index / 6) * Math.PI * 2) * Math.min(100, endY * .5);
+      const angle = (index / GEM_IDS.length) * Math.PI * 2;
+      const middleX = Math.max(0, Math.min(shell.clientWidth, endX + Math.cos(angle) * shell.clientWidth * .24));
+      const middleY = Math.max(0, Math.min(shell.clientHeight, endY + Math.sin(angle) * 100));
       const pose = (x: number, y: number, scale: number) => `translate3d(${x}px,${y}px,0) scale(${scale})`;
       animations.push(light.animate([
         { transform: pose(point.x, point.y, .5), opacity: .96 },
         { offset: .57, transform: pose(middleX, middleY, 1.6), opacity: 1 },
-        { offset: .89, opacity: 1 },
+        { offset: .89, transform: pose(endX, endY, .68), opacity: 1 },
         { transform: pose(endX, endY, .38), opacity: 0 },
-      ], { duration: 985, delay: index * 15, fill: 'both', easing: 'cubic-bezier(.41,.08,.55,1)' }));
+      ], { duration: CONVERGING_LIGHT_TRAVEL_MS, delay: index * CONVERGING_LIGHT_STAGGER_MS, fill: 'both', easing: 'cubic-bezier(.41,.08,.55,1)' }));
     }
     return () => animations.forEach(animation => animation.cancel());
   }, [stage, board, target]);

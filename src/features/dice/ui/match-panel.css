@@ -1,57 +1,12 @@
-.match-initial-state {
-  position: relative;
-  isolation: isolate;
-  display: grid;
-  grid-template-columns: minmax(150px, .38fr) minmax(0, 1fr);
-  gap: 10px;
-  margin: 12px 0;
-  padding: 10px;
+.match-status-panel {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 10px 12px;
   border: 1px solid #745134;
   border-radius: 8px;
   background: linear-gradient(145deg, #241810e8, #120d0b);
 }
-.match-result { grid-column: 1 / -1; margin: 0; color: #ffe1a5; font-weight: 700; }
-.match-round-number { grid-column: 1 / -1; margin: 0; color: #d8bd9b; font-size: .78rem; }
-
-.match-bank { min-width: 0; }
-.match-state-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
-.match-state-heading h2 { margin: 0; color: #f2d5aa; font: 600 1rem/1.4 Georgia, serif; }
-.match-state-heading .vip-players-button { min-height: 37px; padding: 6px 9px; font-size: .72rem; }
-.match-vault.bank-stage {
-  position: relative;
-  height: clamp(120px, 15vw, 180px);
-  min-height: 120px;
-  overflow: hidden;
-  margin-top: 7px;
-  border: 1px solid #986b41;
-  border-radius: 5px;
-  background: #110d0b;
-}
-.match-vault .vault-status { bottom: 5px; }
-.match-wallets {
-  display: grid;
-  align-content: start;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 225px), 1fr));
-  gap: 8px;
-  min-width: 0;
-}
-.match-wallet-player { position: relative; isolation: isolate; min-width: 0; border-radius: 8px; }
-.match-wallets .player-area {
-  position: relative;
-  inset: auto;
-  width: 100%;
-  transform: none;
-  grid-template-columns: minmax(80px, .48fr) minmax(0, 1fr);
-  gap: 6px;
-  pointer-events: auto;
-}
-.match-wallets .wallet-score { min-height: 102px; padding-inline: 4px; }
-.match-wallets .wallet-tray { min-width: 0; }
-.match-wallets .wallet-score .player-name { font-size: .72rem; }
-.match-dice-pool { grid-column: 1 / -1; margin: 0; color: #d8bd9b; font-size: .76rem; }
-
-@media (max-width: 720px) {
-  .match-initial-state { grid-template-columns: minmax(0, 1fr); }
-  .match-vault.bank-stage { height: 150px; }
-  .match-dice-pool { grid-column: auto; }
-}
+.match-round-number, .match-dice-pool { margin: 0; color: #d8bd9b; font-size: .78rem; }
+.match-status-panel .vip-players-button { margin-inline-start: auto; min-height: 37px; padding: 6px 9px; font-size: .72rem; }

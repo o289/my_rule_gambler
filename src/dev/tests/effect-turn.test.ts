@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { canSelect, cellKey, initialState } from '../../features/board/model/board-model';
 import { EffectPlayer } from '../../features/effects/application/effect-player';
-import { beatsFor, readEffect, scoreLabel, settlementEffects, turnLabel } from '../../features/effects/model/effect-model';
+import { beatsFor, CONVERGING_LIGHT_STAGGER_MS, CONVERGING_LIGHT_TRAVEL_MS, readEffect, scoreLabel, settlementEffects, turnLabel } from '../../features/effects/model/effect-model';
+import { GEM_IDS } from '../../features/board/model/gem-ids';
 import type { Cue, EffectKind } from '../../features/effects/model/effect-model';
 import {
   COMEBACK_BOARD, COMEBACK_GEM, COMEBACK_SCORE, CURRENT_PLAYER, LAST_CELL,
@@ -166,13 +167,21 @@ test('the settlement player finishes or skips BIG WIN before COMEBACK and replay
   const { BOARD_SCORE: score, COMEBACK: rankChange } = EFFECT_PREVIEW_SCENARIO.demo;
   const effects = settlementEffects({ score, rankChange }).map(([kind, params]) => readEffect(kind, params));
   const scoreTime = beatsFor(effects[0]!, false, EFFECT_PREVIEW_SCENARIO).at(-1)!.at;
+  const bigWin = effects[1];
+  assert.ok(bigWin?.kind === 'BIG_WIN');
+  const bigWinBeats = beatsFor(bigWin, false, EFFECT_PREVIEW_SCENARIO);
+  const gather = bigWinBeats.find(beat => beat.cue === 'gather');
+  const silence = bigWinBeats.find(beat => beat.cue === 'silence');
+  const finish = bigWinBeats.at(-1);
+  assert.ok(gather && silence && finish);
+  assert.ok(silence.at > gather.at + CONVERGING_LIGHT_TRAVEL_MS + (GEM_IDS.length - 1) * CONVERGING_LIGHT_STAGGER_MS);
   player.playAll(effects, false);
   assert.equal(player.getSnapshot()?.request.kind, 'BOARD_SCORE');
   advance(scoreTime);
   assert.equal(player.getSnapshot()?.request.kind, 'BIG_WIN');
-  advance(scoreTime + 3700);
+  advance(scoreTime + finish.at - 1);
   assert.equal(player.getSnapshot()?.request.kind, 'BIG_WIN');
-  advance(scoreTime + 3780);
+  advance(scoreTime + finish.at);
   assert.equal(player.getSnapshot()?.request.kind, 'COMEBACK');
   assert.ok(sounded.findIndex(([kind, cue]) => kind === 'BIG_WIN' && cue === 'finish')
     < sounded.findIndex(([kind, cue]) => kind === 'COMEBACK' && cue === 'start'));

@@ -506,7 +506,7 @@ test('a four-player completed board redeals seven dice each, leaves two unused, 
   } finally { registry.dispose(); }
 });
 
-test('a single player wins after two rounds, not the final placer, and reconnect cannot resume a finished game', async () => {
+test('reaching 500 wins on an unfinished board and reconnect cannot resume a finished game', async () => {
   const registry = new RoomRegistry(runtime, 5);
   try {
     const room = registry.create({ id: 'c0ffee22', name: '終局と再接続' });
@@ -546,7 +546,7 @@ test('a single player wins after two rounds, not the final placer, and reconnect
         { player: 0, cells: positivePrefixes.slice(9, 10), end: true },
         { player: 1, cells: positivePrefixes.slice(10, 15), end: false },
         { player: 0, cells: positiveGoals, end: false },
-        { player: 1, cells: negativeGoal, end: false },
+        ...(round === 1 ? [{ player: 1, cells: negativeGoal, end: false }] : []),
       ];
       let lastPlacement: { rollId: string; dieId: string; row: number; column: number; revision: number } | null = null;
       for (const [turnIndex, turn] of chunks.entries()) {
@@ -597,7 +597,8 @@ test('a single player wins after two rounds, not the final placer, and reconnect
     assert.equal(finished.roll, null);
     assert.equal(finished.match?.roundNumber, 2);
     assert.deepEqual(finished.match?.result, { status: 'won', highestScore: 500, winners: [ids[0]] });
-    assert.notEqual(ids[1], ids[0], 'the last placer is not the winning player');
+    assert.equal(finished.state.placements.length, 20, 'the empty penalty goal does not delay victory');
+    assert.equal(finished.match?.completedRows.length, 5);
     const finalEvents = dice[0]!.messages.filter(item => item.type === 'state' && item.settlement?.gameEnded);
     assert.equal(finalEvents.length, 1, 'one final goal emits one terminal settlement event');
     assert.deepEqual(dice.map(peer => peer.messages.filter(item => item.type === 'state' && item.settlement?.gameEnded).length), [1, 1]);
@@ -605,7 +606,7 @@ test('a single player wins after two rounds, not the final placer, and reconnect
     assert.ok(eventMessage?.type === 'state' && eventMessage.settlement);
     if (eventMessage?.type === 'state' && eventMessage.settlement) {
       assert.equal(eventMessage.settlement.roundNumber, 2);
-      assert.equal(eventMessage.settlement.playerId, ids[1], 'the second player placed the final goal');
+      assert.equal(eventMessage.settlement.playerId, ids[0], 'the player who reached 500 triggers victory');
       assert.equal(eventMessage.settlement.afterRanks.find(item => item.rank === 1)?.id, ids[0]);
     }
     const replacement = new DiceGuest();

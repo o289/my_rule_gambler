@@ -40,6 +40,18 @@ export function settlementFollowups(event: MatchSettlementEvent, board: BoardDef
   return followups;
 }
 
+export type SettlementStage = { kind: 'placement' | 'score' | 'bank' } | { kind: 'effect'; request: EffectRequest };
+
+export function settlementStages(event: MatchSettlementEvent, board: BoardDefinition): SettlementStage[] {
+  const stages: SettlementStage[] = [{ kind: 'placement' }, { kind: 'score' }];
+  const [first, ...rest] = settlementFollowups(event, board);
+  if (first?.kind === 'BIG_WIN') stages.push({ kind: 'effect', request: first });
+  if (event.points !== 0) stages.push({ kind: 'bank' });
+  if (first && first.kind !== 'BIG_WIN') stages.push({ kind: 'effect', request: first });
+  stages.push(...rest.map(request => ({ kind: 'effect' as const, request })));
+  return stages;
+}
+
 export interface ComebackHint {
   readonly target: CellAddress;
   readonly gem: GemId;

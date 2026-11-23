@@ -27,10 +27,10 @@ function vaultState(run: BankRun | null) {
   return run.transaction.type === 'deposit' ? '送出準備中' : '回収準備中';
 }
 
-export function Vault({ run, moving = false }: { run: BankRun | null; moving?: boolean }) {
-  const open = moving || Boolean(run?.playing && run.reached.has('open') && !run.reached.has('close'));
-  const unlocked = moving || Boolean(run?.playing && run.reached.has('unlock') && !run.reached.has('lock'));
-  const energized = moving || Boolean(run?.playing && run.reached.has('wake') && !run.reached.has('lock'));
+export function Vault({ run }: { run: BankRun | null }) {
+  const open = Boolean(run?.playing && run.reached.has('open') && !run.reached.has('close'));
+  const unlocked = Boolean(run?.playing && run.reached.has('unlock') && !run.reached.has('lock'));
+  const energized = Boolean(run?.playing && run.reached.has('wake') && !run.reached.has('lock'));
 
   const pulse = run?.transaction.type === 'deposit' || run?.reached.has('change') ? [...run.flights.values()].filter(flight => flight.direction === 'deposit').at(-1)?.coin : run?.lastReceipt;
 
@@ -38,7 +38,7 @@ export function Vault({ run, moving = false }: { run: BankRun | null; moving?: b
     <>
       <div className="vault-camera" data-energized={energized} aria-hidden="true">
         <img className="vault-hall" src={hall} alt="" draggable={false} />
-        <div className="vault-portal" data-open={open} data-unlocked={unlocked} data-instant={!run ? !moving : run.skipped}>
+        <div className="vault-portal" data-open={open} data-unlocked={unlocked} data-instant={!run || run.skipped}>
           <div className="vault-tunnel-light" />
           <div className="vault-rim-light" />
           <span id="vault-mouth" className="vault-mouth" data-vault-mouth="">
@@ -62,7 +62,7 @@ export function Vault({ run, moving = false }: { run: BankRun | null; moving?: b
       </div>
       <div className="vault-status">
         <span className="status-jewel" data-open={open} aria-hidden="true" />
-        <span>金庫</span><strong>{moving ? '金貨移動中' : vaultState(run)}</strong>
+        <span>金庫</span><strong>{vaultState(run)}</strong>
       </div>
     </>
   );

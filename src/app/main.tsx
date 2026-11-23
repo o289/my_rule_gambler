@@ -32,13 +32,7 @@ function App() {
   const showList = value === 'list';
   if (gameRoom) {
     const Dice = previews.dice;
-    const room = params.get('room')!.toLowerCase();
-    return <>
-      <a className="preview-back" href={`/?room=${encodeURIComponent(room)}`} aria-label="待機室へ戻る">
-        <span aria-hidden="true">←</span> 待機室
-      </a>
-      <Suspense fallback={<div className="preview-loading" role="status">対戦を読み込んでいます…</div>}><Dice /></Suspense>
-    </>;
+    return <Suspense fallback={<div className="preview-loading" role="status">対戦を読み込んでいます…</div>}><Dice /></Suspense>;
   }
   if (selected) {
     const Preview = previews[selected];

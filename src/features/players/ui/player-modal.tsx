@@ -17,6 +17,7 @@ interface Transfer {
 
 export interface PlayerModalHandle {
   open(): void;
+  close(): void;
 }
 
 interface ModalProps {
@@ -70,6 +71,7 @@ export function PlayerInfoModal({ snapshot, opener, ref, onVisibilityChange }: M
   }
 
   useImperativeHandle(ref, () => ({
+    close,
     open() {
       const panel = dialog.current;
       if (!panel || panel.open || phase.current !== 'closed') return;

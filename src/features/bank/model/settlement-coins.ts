@@ -20,3 +20,10 @@ export function settlementCoinMoves(prefix: string, points: number): SettlementC
   return points < 0 ? { outgoing: coins, incoming: [] }
     : { outgoing: [], incoming: coins };
 }
+
+export function settlementPlaybackCoins(scoreAfter: number, points: number) {
+  const { incoming, outgoing } = settlementCoinMoves('transaction', points);
+  const remainder = Math.min(scoreAfter, scoreAfter - points);
+  const { incoming: wallet } = settlementCoinMoves('wallet', remainder);
+  return { wallet: [...wallet, ...outgoing], reserve: incoming };
+}

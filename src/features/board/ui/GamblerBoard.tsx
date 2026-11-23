@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, Ref } from 'react';
 import type { BoardDefinition, BoardState, CellAddress } from '../model/board-model';
 import { cellKey, formatScore, nextOpenCell, playableColumns, requiredGemAt } from '../model/board-model';
-import { SCORE_BEAM_MS, SCORE_PLATE_MS, SCORE_STAGGER_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
+import { PLACEMENT_FLASH_MS, SCORE_BEAM_MS, SCORE_PLATE_MS, SCORE_STAGGER_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
 import { GEMS } from '../model/gems';
 import type { GemId } from '../model/gems';
 
@@ -74,6 +74,7 @@ interface BoardProps {
 
 type BoardStyle = CSSProperties & {
   '--columns': number;
+  '--placement-flash-duration': string;
   '--beam-duration': string;
   '--plate-duration': string;
 };
@@ -91,6 +92,7 @@ export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice,
   const [isOverflowing, setOverflowing] = useState(false);
   const style: BoardStyle = {
     '--columns': board.columns.length,
+    '--placement-flash-duration': `${PLACEMENT_FLASH_MS}ms`,
     '--beam-duration': `${SCORE_BEAM_MS}ms`,
     '--plate-duration': `${SCORE_PLATE_MS}ms`,
   };

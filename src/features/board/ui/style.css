@@ -295,7 +295,7 @@ button:disabled { cursor: default; }
 
 .placement-flash {
   background: radial-gradient(circle, #ffe2a8da 3%, #ffb3448a 35%, transparent 72%);
-  animation: placement-flash 490ms cubic-bezier(.18, .73, .35, 1) both;
+  animation: placement-flash var(--placement-flash-duration, 490ms) cubic-bezier(.18, .73, .35, 1) both;
 }
 
 .cell-gem--placed {

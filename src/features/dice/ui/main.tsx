@@ -1,6 +1,6 @@
 import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import type { CSSProperties } from 'react';
 import { GamblerBoard } from '../../board/ui/GamblerBoard';
 import { cellKey, goalColumn, playableColumns } from '../../board/model/board-model';
 import type { BoardDefinition, BoardState, CellAddress } from '../../board/model/board-model';
@@ -15,12 +15,15 @@ import { MatchPanel } from './match-panel';
 import { DiceSound } from './sound';
 import { preloadDice } from './face-canvases';
 import { placementCandidates } from '../model/placement-feedback';
+import { ROLL_RESULT_DISPLAY_MS, rollPresentationAction } from '../model/roll-presentation';
 import { TURN_CHANGE_DURATION_MS, REDUCED_TURN_CHANGE_DURATION_MS } from '../../effects/model/effect-model';
 import { scoreLabel } from '../../effects/model/effect-model';
 import { TurnAnnouncement } from '../../effects/ui/settlement-scenes';
-import { oneCellComebackHint, settlementFollowups } from '../model/settlement-presentation';
-import { REDUCED_SCORE_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
-import { COIN_TRAVEL_MS } from '../../bank/model/bank-model';
+import { oneCellComebackHint, settlementStages } from '../model/settlement-presentation';
+import { PLACEMENT_FLASH_MS, REDUCED_SCORE_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
+import { locateCell } from '../../effects/ui/board-scene';
+import { BankAudio } from '../../bank/ui/bank-audio';
+import { SettlementBank } from './settlement-bank';
 import { SoundManager } from '../../effects/ui/sound';
 import './style.css';
 import '../../effects/ui/board-score/score-effect.css';
@@ -51,11 +54,10 @@ function DiceIcon({ gem }: { gem: GemId }) {
   return <img src={GEMS[gem].image} alt="" draggable={false} />;
 }
 
-function ResultStrip({ list, action, chosen, remaining }: {
+function ResultStrip({ list, action, chosen }: {
   list: readonly DiceResult[];
   action?: (id: string) => void;
   chosen?: string;
-  remaining?: readonly string[];
 }) {
   return <ol className="results-strip" aria-label="確定した出目">
     {list.map((result, index) => {
@@ -63,91 +65,75 @@ function ResultStrip({ list, action, chosen, remaining }: {
         <span className="result-name">{GEMS[result.gem].name}</span></>;
       return <li key={result.id} data-gem={result.gem} data-die-id={result.id} aria-label={`${index + 1}番、${GEMS[result.gem].name}`}>
         {action ? <button type="button" onClick={() => action(result.id)} aria-pressed={chosen === result.id}
-          disabled={!remaining?.includes(result.id)} className="result-choice">{datum}</button>
+          className="result-choice">{datum}</button>
           : <div className="result-tile">{datum}</div>}
       </li>;
     })}
   </ol>;
 }
 
-function TrayDialog({ info, setFps, children, onClose, focusTarget, stream, onCup }: {
+const trayStyle: CSSProperties & { '--roll-result-display-ms': string } = {
+  '--roll-result-display-ms': `${ROLL_RESULT_DISPLAY_MS}ms`,
+};
+
+function DiceRollPanel({ roll, info, setFps, onConfirm, onDismiss, stream, onCup }: {
+  roll: RollView;
   info: ConnectionView;
   setFps: (fps: number | null) => void;
-  children: ReactNode;
-  onClose: (id: string) => void;
-  focusTarget: () => HTMLElement | null;
+  onConfirm: (id: string) => void;
+  onDismiss: (id: string) => void;
   stream: DiceConnection['frames'];
   onCup: () => void;
 }) {
-  const shell = useRef<HTMLDialogElement>(null);
-  const [visible, setVisible] = useState(false);
-  const timer = useRef<number | undefined>(undefined);
-  const lastRoll = useRef<RollView | null>(null);
-  const open = Boolean(info.tray);
-  useLayoutEffect(() => {
-    const dialog = shell.current;
-    if (!dialog) return;
-    window.clearTimeout(timer.current);
-    if (open) {
-      if (!dialog.open) dialog.showModal();
-      dialog.dataset.motion = 'open';
-      setVisible(true);
-    } else if (dialog.open) {
-      dialog.dataset.motion = 'close';
-      const finish = () => {
-        dialog.close();
-        setVisible(false);
-        setFps(null);
-        focusTarget()?.focus({ preventScroll: true });
-      };
-      if (matchMedia('(prefers-reduced-motion: reduce)').matches) finish();
-      else timer.current = window.setTimeout(finish, 350);
-    }
-    return () => window.clearTimeout(timer.current);
-  }, [open, setFps, focusTarget]);
+  const [complete, setComplete] = useState(false);
+  const confirmButton = useRef<HTMLButtonElement>(null);
+  const markComplete = useCallback(() => setComplete(true), []);
+  const standard = info.match !== null;
+  const own = info.playerId !== null && info.game?.turnId === info.playerId;
+  const ready = roll.results.length > 0;
+  const action = rollPresentationAction({ standard, complete: ready && complete, confirmed: roll.confirmed, own, reroll: roll.kind === 'reroll' });
+  const showConfirm = !standard || (own && !roll.confirmed && roll.kind === 'initial');
+  const label = ready ? showConfirm && !roll.confirmed ? '出目を表示しています' : '出目が確定しました'
+    : roll.kind === 'reroll' ? '残ったダイスを振り直しています' : 'ダイスを振っています';
 
-  useLayoutEffect(() => { if (info.roll) lastRoll.current = info.roll; }, [info.roll]);
+  useEffect(() => {
+    if (action === 'show-board') onDismiss(roll.id);
+    else if (action === 'auto-confirm' && info.status === 'online' && !info.pending) onConfirm(roll.id);
+  }, [action, roll.id, info.status, info.pending, onConfirm, onDismiss]);
+  useEffect(() => {
+    if (action === 'confirm' && own && info.status === 'online' && !info.pending) confirmButton.current?.focus({ preventScroll: true });
+  }, [action, own, info.status, info.pending]);
 
-  const roll = info.roll ?? lastRoll.current;
-  const ready = Boolean(roll?.results.length);
-  const label = ready ? '出目が確定しました' : roll?.kind === 'reroll' ? '残ったダイスを振り直しています' : 'ダイスを振っています';
-  return <dialog className="tray-dialog" id="dice-tray" ref={shell} aria-labelledby="tray-title"
-    onCancel={event => event.preventDefault()}>
-    {visible && roll && <>
-      <div className="tray-box">
-        <header className="tray-heading">
-          <div><span className="salon-legend">ATELIER NOIR</span><h2 id="tray-title">DICE TRAY</h2></div>
-          <span className="tray-status" role="status">{info.status !== 'online' ? '接続を再開しています…' : label}</span>
-        </header>
-        <Suspense fallback={<div className="tray-visual"><p className="tray-problem">3Dトレイを準備しています…</p></div>}>
-          <TrayScene stream={stream} roll={roll} onFps={setFps} onCup={onCup} />
-        </Suspense>
-        <div className="tray-result" data-settled={ready}>
-          {ready ? <ResultStrip list={roll.results} /> : <p>すべてのダイスが止まると出目が表示されます。</p>}
-          {info.game?.turnNotice === 'no-legal-placement' && <p className="turn-notice" role="status">置けるマスがありません。手番を交代しました。</p>}
-        </div>
-        <div className="tray-actions">
-          <button type="button" id="confirm-dice" className="gold-button" disabled={!ready || !open || info.status !== 'online'}
-            onClick={() => onClose(roll.id)}>CONFIRM</button>
-        </div>
-      </div>
-      {children}
-    </>}
-  </dialog>;
-}
-
-function focusTarget() {
-  return document.querySelector<HTMLElement>('#turn-commands button:enabled') ?? document.querySelector<HTMLElement>('#turn-commands');
+  return <section className="tray-box" id="dice-tray" aria-labelledby="tray-title" style={trayStyle}>
+    <header className="tray-heading">
+      <h2 id="tray-title">DICE TRAY</h2>
+      <span className="tray-status" role="status">{info.status !== 'online' ? '接続を再開しています…' : label}</span>
+    </header>
+    <Suspense fallback={<div className="tray-visual"><p className="tray-problem">3Dトレイを準備しています…</p></div>}>
+      <TrayScene stream={stream} roll={roll} onFps={setFps} onCup={onCup} onResultComplete={markComplete} />
+    </Suspense>
+    <div className="tray-result" data-settled={ready}>
+      {ready ? <ResultStrip list={roll.results} /> : <p>すべてのダイスが止まると出目が表示されます。</p>}
+      {info.game?.turnNotice === 'no-legal-placement' && <p className="turn-notice" role="status">置けるマスがありません。手番を交代しました。</p>}
+    </div>
+    {showConfirm && <div className="tray-actions">
+      <button ref={confirmButton} type="button" id="confirm-dice" className="gold-button"
+        disabled={action !== 'confirm' || info.pending || info.status !== 'online'} onClick={() => onConfirm(roll.id)}>CONFIRM</button>
+    </div>}
+  </section>;
 }
 
 function App({ connection, boardAdapter }: { connection: DiceConnection; boardAdapter: DiceBoardAdapter }) {
   const [audio] = useState(() => new DiceSound());
   const [settlementAudio] = useState(() => new SoundManager());
-  const cupSound = () => audio.cue('cup');
+  const [bankAudio] = useState(() => new BankAudio());
+  const cupSound = useCallback(() => audio.cue('cup'), [audio]);
   useAudioActivation(audio.unlock);
   useAudioActivation(settlementAudio.unlock);
+  useAudioActivation(bankAudio.unlock);
   const info = useSyncExternalStore(connection.subscribe, connection.getSnapshot);
   const { game, roll } = info;
+  const trayRoll = roll && roll.id === info.tray ? roll : null;
   const own = Boolean(game?.turnId && game.turnId === info.playerId);
   const inPlacement = game?.phase === 'placement';
   const hasStandardMatch = info.match !== null;
@@ -158,90 +144,101 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const showFinalResults = Boolean(hasStandardMatch && finalResult && !settlement);
   const settlementKey = settlement ? `${settlement.boardSeed}:${settlement.revision}` : null;
   const boardRef = useRef<HTMLElement>(null);
-  const [settlementStep, setSettlementStep] = useState<{ key: string; step: 'score' | 'bonus'; startedAt: number } | null>(null);
+  const mainArea = useRef<HTMLElement>(null);
+  const [settlementProgress, setSettlementProgress] = useState<{ key: string; index: number }>();
   const reducedMotion = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
+  const placementRevision = info.placement?.revision;
+  const [shownPlacement, setShownPlacement] = useState(-1);
+  const placementPlaying = hasStandardMatch && !settlement && !trayRoll && !reducedMotion
+    && placementRevision !== undefined && placementRevision > shownPlacement;
   useEffect(() => {
-    if (!hasStandardMatch || info.settlements.length > 0 || !game || game.phase !== 'ready' || game.turnSequence < 1 || info.match?.result) return;
+    if (!placementPlaying || placementRevision === undefined) return;
+    const timer = window.setTimeout(() => setShownPlacement(placementRevision), PLACEMENT_FLASH_MS);
+    return () => window.clearTimeout(timer);
+  }, [placementPlaying, placementRevision]);
+
+  useEffect(() => {
+    if (!hasStandardMatch || settlement || trayRoll || placementPlaying || !game || game.phase !== 'ready' || game.turnSequence < 1 || info.match?.result) return;
     const sequence = game.turnSequence;
     const duration = window.matchMedia('(prefers-reduced-motion: reduce)').matches
       ? REDUCED_TURN_CHANGE_DURATION_MS : TURN_CHANGE_DURATION_MS;
     const timer = window.setTimeout(() => setAnnouncedTurnSequence(sequence), duration);
     return () => window.clearTimeout(timer);
-  }, [hasStandardMatch, info.settlements.length, game?.phase, game?.turnSequence, Boolean(info.match?.result)]);
+  }, [hasStandardMatch, settlement, trayRoll, placementPlaying, game?.phase, game?.turnSequence, Boolean(info.match?.result)]);
   const turnNeedsAnnouncement = Boolean(hasStandardMatch && game?.phase === 'ready' && game.turnSequence > 0
-    && info.settlements.length === 0 && !info.match?.result && announcedTurnSequence !== game.turnSequence);
+    && !settlement && !trayRoll && !placementPlaying && !info.match?.result && announcedTurnSequence !== game.turnSequence);
   const turnGateReady = !turnNeedsAnnouncement;
   const showTurnChange = Boolean(turnNeedsAnnouncement && current && game);
   const canAct = own && info.status === 'online' && !info.pending && !info.match?.result
-    && info.settlements.length === 0 && turnGateReady;
+    && !settlement && !trayRoll && !placementPlaying && turnGateReady;
   const [monitor, setMonitor] = useState(false);
   const [fps, setFps] = useState<number | null>(null);
   const [choice, setChoice] = useState<{ rollId: string; dieId: string }>();
-  const selected = useMemo(() => {
-    if (!choice || choice.rollId !== roll?.id || !game?.remaining.includes(choice.dieId)) return undefined;
-    return game.results.find(result => result.id === choice.dieId);
-  }, [game, roll?.id, choice]);
-  const settlementGame = settlement && info.settlementGame?.boardSeed === settlement.boardSeed ? info.settlementGame : null;
-  const displayGame = settlementGame ?? game;
+  const remainingResults = game ? game.results.filter(result => game.remaining.includes(result.id)) : [];
+  const selected = choice && choice.rollId === roll?.id ? remainingResults.find(result => result.id === choice.dieId) : undefined;
+  const settlementSnapshot = info.settlementSnapshot;
+  const displayGame = settlementSnapshot?.game ?? game;
   const seed = displayGame?.boardSeed;
   const definition = useMemo(() => boardAdapter.getDefinition(seed), [boardAdapter, seed]);
   const eventRow = settlement ? definition.rows.find(row => row.id === settlement.rowId) : undefined;
   const eventGoal = eventRow ? goalColumn(definition, eventRow) : undefined;
-  const eventTarget = eventGoal && settlement?.columnId === eventGoal.id && eventRow
-    ? { rowId: eventRow.id, columnId: eventGoal.id } : undefined;
-  const followups = useMemo(() => settlement && eventTarget ? settlementFollowups(settlement, definition) : [],
+  const eventTarget = useMemo(() => eventGoal && settlement?.columnId === eventGoal.id && eventRow
+    ? { rowId: eventRow.id, columnId: eventGoal.id } : undefined, [eventGoal, eventRow, settlement]);
+  const stages = useMemo(() => settlement && eventTarget ? settlementStages(settlement, definition) : [],
     [settlement, eventTarget, definition]);
+  const stageIndex = settlementProgress?.key === settlementKey ? settlementProgress.index : 0;
+  const stage = trayRoll ? undefined : stages[stageIndex];
+  const effect = stage?.kind === 'effect' ? stage.request : null;
   const scoreDuration = eventRow
     ? reducedMotion ? REDUCED_SCORE_MS : scoreTimings(playableColumns(definition, eventRow).length).total
     : REDUCED_SCORE_MS;
-  const settlementScoreVisible = Boolean(settlement && eventTarget && settlementStep?.key === settlementKey && settlementStep.step === 'score');
-  const coinMotionActive = Boolean(settlement && settlementScoreVisible && settlement.points !== 0 && !reducedMotion);
-  const coinStartedAt = settlementStep?.startedAt ?? 0;
+  const advanceSettlement = useCallback(() => {
+    if (!settlementKey || connection.getSnapshot().settlements[0] !== settlement) return;
+    setSettlementProgress(previous => {
+      const index = previous?.key === settlementKey ? previous.index : 0;
+      return index === stageIndex ? { key: settlementKey, index: index + 1 } : previous;
+    });
+  }, [connection, settlement, settlementKey, stageIndex]);
+
+  useLayoutEffect(() => {
+    if (trayRoll) return;
+    if (settlement) setShownPlacement(previous => Math.max(previous, settlement.revision));
+    locateCell(boardRef.current, eventTarget)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [eventTarget, settlement, trayRoll]);
 
   useEffect(() => {
-    if (!settlement || !settlementKey) { setSettlementStep(null); return; }
-    if (!eventTarget) {
-      connection.completeSettlement(settlement);
-      setSettlementStep(null);
-      return;
+    if (!trayRoll && settlement && (!stage || (stage.kind === 'bank' && !settlementSnapshot))) {
+      if (stage) advanceSettlement();
+      else connection.completeSettlement(settlement);
     }
-    if (settlementStep?.key === settlementKey) return;
-    settlementAudio.playCue('BOARD_SCORE', 'start', reducedMotion);
-    setSettlementStep({ key: settlementKey, step: 'score', startedAt: performance.now() });
-  }, [connection, settlement, settlementKey, Boolean(eventTarget), settlementStep?.key, settlementAudio, reducedMotion]);
+  }, [connection, settlement, stage, settlementSnapshot, trayRoll, advanceSettlement]);
 
   useEffect(() => {
-    if (!settlement || !settlementKey || settlementStep?.key !== settlementKey || settlementStep.step !== 'score') return;
-    const duration = Math.max(scoreDuration, coinMotionActive ? COIN_TRAVEL_MS : 0);
-    const timer = window.setTimeout(() => {
-      if (followups.length) setSettlementStep(currentStep => currentStep?.key === settlementKey
-        ? { ...currentStep, step: 'bonus' } : currentStep);
-      else {
-        connection.completeSettlement(settlement);
-        setSettlementStep(currentStep => currentStep?.key === settlementKey ? null : currentStep);
-      }
-    }, duration);
-    return () => window.clearTimeout(timer);
-  }, [connection, settlement, settlementKey, settlementStep?.key, settlementStep?.step, scoreDuration, coinMotionActive, followups.length]);
+    if (stage?.kind !== 'placement' && stage?.kind !== 'score') return;
+    const scoring = stage.kind === 'score';
+    if (scoring) settlementAudio.playCue('BOARD_SCORE', 'start', reducedMotion);
+    const duration = scoring ? scoreDuration : reducedMotion ? 0 : PLACEMENT_FLASH_MS;
+    const timer = window.setTimeout(advanceSettlement, duration);
+    return () => {
+      window.clearTimeout(timer);
+      if (scoring) settlementAudio.cut();
+    };
+  }, [stage, scoreDuration, settlementAudio, reducedMotion, advanceSettlement]);
   const board = useMemo(() => {
     const state = boardAdapter.createState(definition, displayGame);
     const placement = info.placement;
     let next = state;
-    if (!settlement && placement) {
+    if (!settlement && placement && (!hasStandardMatch || placementPlaying)) {
       const rowId = definition.rows[placement.row]?.id;
       const columnId = definition.columns[placement.column]?.id;
       if (rowId && columnId) next = { ...next, placement: { cell: cellKey({ rowId, columnId }), id: placement.revision } };
     }
-    if (settlement && eventTarget && displayGame?.boardSeed === settlement.boardSeed) {
-      const row = definition.rows.findIndex(item => item.id === eventTarget.rowId);
-      const column = definition.columns.findIndex(item => item.id === eventTarget.columnId);
-      if (row >= 0 && column >= 0) next = { ...next, placement: { cell: cellKey(eventTarget), id: settlement.revision } };
-    }
-    if (settlementScoreVisible && settlement && eventTarget && displayGame?.boardSeed === settlement.boardSeed) {
-      next = { ...next, award: { id: settlement.revision, rowId: eventTarget.rowId, amount: settlement.points } };
+    if (settlement && eventTarget) {
+      if (stage?.kind === 'placement') next = { ...next, placement: { cell: cellKey(eventTarget), id: settlement.revision } };
+      if (stage?.kind === 'score') next = { ...next, award: { id: settlement.revision, rowId: eventTarget.rowId, amount: settlement.points } };
     }
     return next;
-  }, [boardAdapter, definition, displayGame, game, info.placement, settlementScoreVisible, settlement, eventTarget]);
+  }, [boardAdapter, definition, displayGame, info.placement, hasStandardMatch, placementPlaying, stage, settlement, eventTarget]);
   const candidates = useMemo(() => canAct && inPlacement && selected
     ? placementCandidates(definition, board.occupied, selected.gem)
     : undefined, [canAct, inPlacement, selected, definition, board.occupied]);
@@ -273,13 +270,20 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const resultCount = roll?.results.length ?? 0;
   useEffect(() => { if (info.tray && resultCount) audio.cue('result'); }, [info.tray, resultCount]);
 
-  function confirm(id: string) {
+  const confirm = useCallback((id: string) => {
     if (connection.confirm(id)) audio.cue('confirm');
-  }
+  }, [connection, audio]);
+  const dismissRoll = useCallback((id: string) => connection.dismissConfirmedRoll(id), [connection]);
 
   const seat = game?.seats.find(item => item.id === info.playerId);
   const waitingForBoard = Boolean(boardAdapter.requiresServerBoard && game?.boardSeed === undefined);
-  const trayInfo = info.settlements.length > 0 && info.tray ? { ...info, tray: null } : info;
+  const bankSettlement = stage?.kind === 'bank' && settlement && settlementSnapshot
+    ? { event: settlement, player: settlementSnapshot.player } : null;
+  const surface = trayRoll ? 'dice' : bankSettlement ? 'bank' : 'board';
+  useLayoutEffect(() => {
+    if (surface !== 'board') mainArea.current?.scrollIntoView({ block: 'nearest' });
+  }, [surface]);
+  useEffect(() => { setFps(null); }, [trayRoll?.id]);
   const devReroll = Boolean(info.dev && game && !game.placedThisRoll);
   const perf = <PerformanceMonitor info={info} fps={fps} own={own} expanded={monitor} expand={setMonitor}
     configure={config => connection.send({ type: 'config', config })} />;
@@ -292,7 +296,6 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
     <div className="salon-title"><h1>宝石サイコロ 3D</h1><span role="status">{seat?.name ?? (info.status === 'offline' ? '再接続中' : '接続中')} {seat && (own ? '・あなたの手番' : current ? `・${current.name} の手番` : '')}</span></div>
     {showTurnChange && current && game && <section key={game.turnSequence} className="turn-change-gate" aria-label="手番の案内">
       <TurnAnnouncement key={game.turnSequence} player={{ playerName: current.name, isLocal: own }} pulse />
-      {own && <button type="button" className="turn-change-skip" onClick={() => game && setAnnouncedTurnSequence(game.turnSequence)}>演出をスキップ</button>}
     </section>}
     <div className="settlement-stage">
     {showFinalResults && info.match ? <section className="final-results-screen" aria-labelledby="final-results-title">
@@ -304,14 +307,25 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
       {finalResult && <p>{finalResult.winners.length > 1 ? '同率優勝' : '優勝'}：
         {finalResult.winners.map(id => info.match?.players.find(player => player.id === id)?.name ?? id).join('、')}</p>}
     </section> : <div className="table-layout">
-      <div className="game-board">
-        {waitingForBoard
+      <section className="game-board" ref={mainArea} aria-label="メイン演出エリア" data-view={surface}>
+        {trayRoll ? <DiceRollPanel key={trayRoll.id} roll={trayRoll} info={info} setFps={setFps}
+          onConfirm={confirm} onDismiss={dismissRoll} stream={connection.frames} onCup={cupSound} />
+          : bankSettlement ? <SettlementBank key={settlementKey} event={bankSettlement.event} player={bankSettlement.player}
+            audio={bankAudio} reduced={reducedMotion} onComplete={advanceSettlement} />
+          : waitingForBoard
           ? <div className="board-loading" role="status">共有盤面を読み込んでいます…</div>
           : <GamblerBoard board={definition} state={board} viewportRef={boardRef} candidates={candidates}
-            scoreNotice={settlementScoreVisible && settlement && eventTarget ? { rowId: eventTarget.rowId, label: scoreLabel(settlement.points) } : undefined}
+            scoreNotice={stage?.kind === 'score' && settlement && eventTarget ? { rowId: eventTarget.rowId, label: scoreLabel(settlement.points) } : undefined}
             hintCell={comebackHint?.target}
             onSelect={cell => boardAdapter.onSelect(cell, { game, roll, selected, canAct, inPlacement, board, definition })} />}
-      </div>
+        {effect?.kind === 'BIG_WIN' && eventTarget && <Suspense fallback={null}>
+          <SettlementOverlay key={`${settlementKey}-${stageIndex}`} request={effect} target={eventTarget} board={definition}
+            boardRef={boardRef} audio={settlementAudio} reduced={reducedMotion} onComplete={advanceSettlement} />
+        </Suspense>}
+      </section>
+      <div className="table-sidebar">
+      <MatchPanel match={info.match} turnId={game?.turnId ?? null} playerId={info.playerId}
+        turnSequence={game?.turnSequence ?? 0} settlement={settlement} effectsPlaying={Boolean(trayRoll || settlement)} />
       <aside className="turn-card" aria-labelledby="turn-title">
         <div className="turn-heading"><h2 id="turn-title">ダイス操作</h2><span>{game?.seats.filter(item => item.online).length ?? 0}人 接続</span></div>
         <div id="turn-commands" tabIndex={-1}>
@@ -325,8 +339,9 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
             onClick={() => connection.roll('roll')}>ROLL DICE</button>}
         </div>
         <p className="turn-note">
-          {game?.turnNotice === 'no-legal-placement' ? '置けるマスがありません。手番を交代しました。'
-            : info.settlements.length ? '得点を確定しています。'
+          {trayRoll ? 'メインエリアにダイスの出目を表示します。'
+            : settlement ? '得点演出を表示しています。'
+            : game?.turnNotice === 'no-legal-placement' ? '置けるマスがありません。手番を交代しました。'
             : info.match?.result ? info.match.result.status === 'won' ? '対戦結果が確定しました。' : 'ラウンドが完成しました。'
             : info.status !== 'online' ? 'ルームに接続しています。'
             : !own ? '手番のプレイヤーの操作を待っています。'
@@ -342,38 +357,25 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
           {GEMS[comebackHint.gem].name}を置くと単独首位です。
         </p>}
         {info.problem && <p className="notice" role="status">{info.problem}</p>}
-        <div className="retained"><h3>確定した出目</h3>
-          {game?.results.length
-            ? <ResultStrip list={game.results} action={canAct && inPlacement && roll
+        {!trayRoll && <div className="retained"><h3>確定した出目</h3>
+          {remainingResults.length > 0
+            ? <ResultStrip list={remainingResults} action={canAct && inPlacement && roll
               ? dieId => setChoice({ rollId: roll.id, dieId }) : undefined}
-              chosen={selected?.id} remaining={game.remaining} />
-            : <span className="waiting-result">出目の確定を待っています。</span>}
-        </div>
+              chosen={selected?.id} />
+            : <span className="waiting-result">{inPlacement ? '配置できる出目は残っていません。' : '出目の確定を待っています。'}</span>}
+        </div>}
       </aside>
+      </div>
     </div>}
-    {settlement && <p key={settlementKey} className="sr-only" role="status" aria-live="polite">
+    {settlement && stage?.kind === 'score' && <p key={settlementKey} className="sr-only" role="status" aria-live="polite">
       {settlement.playerName}　{scoreLabel(settlement.points)}
     </p>}
-    <MatchPanel room={connection.room} match={info.match} turnId={game?.turnId ?? null} playerId={info.playerId}
-      turnSequence={game?.turnSequence ?? 0} settlement={settlement} coinActive={coinMotionActive} coinStartedAt={coinStartedAt} />
-    {settlement && settlementKey && settlementScoreVisible && <button type="button" className="settlement-score-skip"
-      onClick={() => {
-        if (followups.length) setSettlementStep(currentStep => currentStep?.key === settlementKey
-          ? { ...currentStep, step: 'bonus' } : currentStep);
-        else {
-          connection.completeSettlement(settlement);
-          setSettlementStep(currentStep => currentStep?.key === settlementKey ? null : currentStep);
-        }
-      }}>得点演出をスキップ</button>}
-    {settlement && settlementKey && settlementStep?.key === settlementKey && settlementStep.step === 'bonus' && followups.length > 0
-      && <Suspense fallback={null}><SettlementOverlay key={settlementKey} event={settlement} board={definition} boardRef={boardRef} audio={settlementAudio}
-        onComplete={() => {
-          connection.completeSettlement(settlement);
-          setSettlementStep(currentStep => currentStep?.key === settlementKey ? null : currentStep);
-        }} /></Suspense>}
+    {effect && effect.kind !== 'BIG_WIN' && eventTarget && <Suspense fallback={null}>
+      <SettlementOverlay key={`${settlementKey}-${stageIndex}`} request={effect} target={eventTarget} board={definition}
+        boardRef={boardRef} audio={settlementAudio} reduced={reducedMotion} onComplete={advanceSettlement} />
+    </Suspense>}
     </div>
-    {!info.tray && perf}
-    <TrayDialog info={trayInfo} setFps={setFps} onClose={confirm} focusTarget={focusTarget} stream={connection.frames} onCup={cupSound}>{trayInfo.tray && perf}</TrayDialog>
+    {perf}
   </main>;
 }
 

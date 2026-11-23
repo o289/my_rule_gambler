@@ -13,10 +13,10 @@ import { CrownIcon } from './vip-icons';
 import './style.css';
 
 
-export function VIPPlayersButton({ buttonRef, open, onClick }: { buttonRef: Ref<HTMLButtonElement>; open: boolean; onClick: () => void }) {
+export function VIPPlayersButton({ buttonRef, open, disabled, onClick }: { buttonRef: Ref<HTMLButtonElement>; open: boolean; disabled?: boolean; onClick: () => void }) {
   return (
     <button ref={buttonRef} type="button" className="vip-players-button" id="vip-players-button"
-      aria-haspopup="dialog" aria-controls="vip-players-dialog" aria-expanded={open} onClick={onClick}>
+      aria-haspopup="dialog" aria-controls="vip-players-dialog" aria-expanded={open} disabled={disabled} onClick={onClick}>
       <CrownIcon /><span lang="en">VIP PLAYERS</span>
     </button>
   );

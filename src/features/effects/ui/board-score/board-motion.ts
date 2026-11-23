@@ -1,4 +1,5 @@
 export const SCORE_STAGGER_MS = 92;
+export const PLACEMENT_FLASH_MS = 490;
 export const SCORE_BEAM_MS = 410;
 export const SCORE_PLATE_MS = 680;
 export const REDUCED_SCORE_MS = 780;
