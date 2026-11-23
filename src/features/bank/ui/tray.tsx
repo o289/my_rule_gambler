@@ -62,7 +62,7 @@ function CoinGroups({ wallet, renderCoin }: { wallet: readonly Coin[]; renderCoi
   );
 }
 
-export function PlayerTray({ snapshot, playerName }: { snapshot: BankSnapshot; playerName: string }) {
+export function PlayerTray({ snapshot, playerName }: { snapshot: Pick<BankSnapshot, 'mode' | 'balance' | 'wallet' | 'run' | 'compression'>; playerName: string }) {
   const tray = useRef<HTMLDivElement>(null);
   const { wallet, balance, run, mode, compression } = snapshot;
   const deposit = mode === 'deposit';

@@ -5,18 +5,20 @@ import { RoomRegistry } from '../../platform/server/core/room-registry';
 import type { RoomRuntime } from '../../platform/server/core/ports';
 import type { LobbyPeer, DicePeer } from '../../platform/server/core/room';
 import type { ServerMessage as LobbyMessage } from '../../shared/contracts/casino-entry';
+import { parseJson, readServerMessage } from '../../shared/contracts/dice';
 import type { ServerMessage as DiceMessage } from '../../shared/contracts/dice';
 import type { Frame, DiceResult } from '../../shared/contracts/dice';
 import { createGoalBoard } from '../../features/board/model/goal-layout';
 import { nextOpenCell, requiredGemAt } from '../../features/board/model/board-model';
 
 let serial = 0;
+let boardSeedCalls = 0;
 let completeRoll: ((frame: Frame, results: readonly DiceResult[], nudges: number, deadline: boolean) => void) | null = null;
 const runtime: RoomRuntime = {
   now: () => Date.now(),
   createPlayerId: () => `player-${++serial}`,
   createToken: () => String(++serial).padStart(32, 't'),
-  createBoardSeed: () => 17,
+  createBoardSeed: () => { boardSeedCalls += 1; return 17; },
   schedule: (callback, ms) => setTimeout(callback, ms),
   cancelTimer: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
   createRoll: (input, callbacks) => {
@@ -40,7 +42,7 @@ class DiceGuest implements DicePeer {
   readonly protocol = 'dice' as const;
   readonly messages: DiceMessage[] = [];
   close() {}
-  send(message: DiceMessage) { this.messages.push(message); return true; }
+  send(message: DiceMessage) { assert.ok(readServerMessage(parseJson(JSON.stringify(message)))); this.messages.push(message); return true; }
 }
 
 test('one registry Room carries the frozen lobby seats into the dice connection', async () => {
@@ -68,6 +70,7 @@ test('one registry Room carries the frozen lobby seats into the dice connection'
     if (states[0]?.type === 'welcome') {
       assert.deepEqual(states[0].state.seats.map(seat => seat.id), frozen?.map(seat => seat.id));
       assert.equal(states[0].dev, false, 'standard rooms never grant preview development controls');
+      assert.deepEqual(states[0].match?.players.map(player => player.diceCount), [15, 15]);
     }
     const firstId = lobby[0]!.welcome.playerId;
     room.commandDice(firstId, dice[0]!, { type: 'roll', requestId: 'first-roll' });
@@ -96,6 +99,9 @@ test('one registry Room carries the frozen lobby seats into the dice connection'
       assert.deepEqual(resumed.state.placements, placed.state.placements);
       assert.equal(resumed.state.revision, placed.state.revision);
       assert.equal(resumed.state.turnId, placed.state.turnId);
+      assert.equal(resumed.state.placements[0]?.dieId, results[0]!.id);
+      assert.equal(resumed.match?.players[0]?.diceCount, 14);
+      assert.equal(resumed.match?.placedDiceCount, 1);
       room.disconnect(firstId, dice[0]!);
       room.commandDice(firstId, replacement, { type: 'end-turn', revision: placed.state.revision });
       const afterOldClose = [...replacement.messages].reverse().find(message => message.type === 'state');
@@ -104,6 +110,41 @@ test('one registry Room carries the frozen lobby seats into the dice connection'
     }
     assert.equal(room.connectDice(new DiceGuest(), { token: String('x').repeat(32) }), null);
   } finally { registry.dispose(); }
+});
+
+test('standard startup allocates thirty dice and eighty points exactly once for two to six seats', async () => {
+  const dicePerPlayer = [0, 0, 15, 10, 7, 6, 5];
+  for (let count = 2; count <= 6; count += 1) {
+    const registry = new RoomRegistry(runtime, 5);
+    try {
+      const room = registry.create({ id: `${count}0000000`, name: `卓${count}` });
+      assert.ok(room);
+      const before = boardSeedCalls;
+      const lobby = Array.from({ length: count }, () => new LobbyGuest());
+      lobby.forEach(peer => room.connectLobby(peer));
+      lobby.forEach(peer => room.commandLobby(peer.welcome.playerId, peer, { type: 'ready', ready: true }));
+      await delay(20);
+      assert.equal(lobby[0]!.state.phase, 'started');
+      assert.equal(boardSeedCalls - before, 1, 'the start creates one board and one match');
+      const dice = lobby.map(() => new DiceGuest());
+      dice.forEach((peer, index) => room.connectDice(peer, { token: lobby[index]!.welcome.token }));
+      const welcomes = dice.map(peer => peer.messages.find(message => message.type === 'welcome'));
+      assert.ok(welcomes.every(message => message?.type === 'welcome' && message.match));
+      if (welcomes[0]?.type === 'welcome' && welcomes[0].match) {
+        const setup = welcomes[0].match;
+        assert.deepEqual(setup.players.map(player => player.diceCount), Array(count).fill(dicePerPlayer[count]));
+        assert.ok(setup.players.every(player => player.score === 80
+          && player.wallet.reduce((sum, group) => sum + group.denomination * group.count, 0) === 80));
+        assert.equal(setup.unusedDiceCount, count === 4 ? 2 : 0);
+        assert.equal(setup.placedDiceCount, 0);
+        assert.equal(welcomes[0].state.turnId, lobby[0]!.welcome.playerId);
+        assert.deepEqual(setup.players.map(player => player.id), lobby.map(peer => peer.welcome.playerId));
+        const firstWallet = setup.players[0]?.wallet;
+        assert.deepEqual(firstWallet, [{ denomination: 50, count: 1 }, { denomination: 10, count: 3 }]);
+      }
+      assert.equal(boardSeedCalls - before, 1, 'subsequent player connections reuse the started board');
+    } finally { registry.dispose(); }
+  }
 });
 
 test('preview rooms are isolated from reserved eight-hex gameplay rooms', () => {

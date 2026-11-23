@@ -44,7 +44,7 @@ export interface RollView {
 }
 
 export interface Seat { id: string; name: string; online: boolean }
-export interface Placement { row: number; column: number; gem: GemId }
+export interface Placement { row: number; column: number; gem: GemId; dieId?: string }
 export interface GameState {
   seats: readonly Seat[];
   turnId: string | null;
@@ -57,6 +57,27 @@ export interface GameState {
   remaining: readonly string[];
   placedThisRoll: boolean;
   hasLegalPlacement: boolean;
+}
+
+export interface MatchWalletGroup {
+  readonly denomination: 10 | 50 | 100;
+  readonly count: number;
+}
+
+export interface MatchPlayerSetup {
+  readonly id: string;
+  readonly name: string;
+  readonly slot: number;
+  readonly score: number;
+  readonly diceCount: number;
+  readonly wallet: readonly MatchWalletGroup[];
+}
+
+export interface MatchSetup {
+  readonly totalDice: 30;
+  readonly unusedDiceCount: number;
+  readonly placedDiceCount: number;
+  readonly players: readonly MatchPlayerSetup[];
 }
 
 export interface Metrics {
@@ -79,8 +100,8 @@ export type ClientMessage =
   | { type: 'end-turn'; revision: number };
 
 export type ServerMessage =
-  | { type: 'welcome'; playerId: string; token: string; dev: boolean; view: boolean; state: GameState; roll: RollView | null }
-  | { type: 'state'; state: GameState; roll: RollView | null }
+  | { type: 'welcome'; playerId: string; token: string; dev: boolean; view: boolean; state: GameState; roll: RollView | null; match?: MatchSetup }
+  | { type: 'state'; state: GameState; roll: RollView | null; match?: MatchSetup }
   | { type: 'frame'; frame: Frame }
   | { type: 'metrics'; metrics: Metrics }
   | { type: 'error'; code: string; message: string };
@@ -171,7 +192,8 @@ function seat(value: unknown): value is Seat {
   return record(value) && id(value.id) && typeof value.name === 'string' && typeof value.online === 'boolean';
 }
 function placement(value: unknown): value is Placement {
-  return record(value) && int(value.row, 0, BOARD_ROWS - 1) && int(value.column, 0, GEM_ORDER.length - 1) && gem(value.gem);
+  return record(value) && int(value.row, 0, BOARD_ROWS - 1) && int(value.column, 0, GEM_ORDER.length - 1) && gem(value.gem)
+    && (value.dieId === undefined || id(value.dieId));
 }
 function gameState(value: unknown): value is GameState {
   return record(value) && listOf(value.seats, seat, 6) && (value.turnId === null || id(value.turnId))
@@ -181,6 +203,24 @@ function gameState(value: unknown): value is GameState {
     && listOf(value.placements, placement, BOARD_ROWS * GEM_ORDER.length)
     && listOf(value.results, diceResult, 5) && listOf(value.remaining, id, 5)
     && typeof value.placedThisRoll === 'boolean' && typeof value.hasLegalPlacement === 'boolean';
+}
+function walletGroup(value: unknown): value is MatchWalletGroup {
+  return record(value) && (value.denomination === 10 || value.denomination === 50 || value.denomination === 100)
+    && int(value.count, 0, 30);
+}
+function matchPlayer(value: unknown): value is MatchPlayerSetup {
+  return record(value) && id(value.id) && typeof value.name === 'string'
+    && int(value.slot, 0, 5) && int(value.score) && int(value.diceCount, 0, 30)
+    && listOf(value.wallet, walletGroup, 3)
+    && value.wallet.reduce((total: number, group: MatchWalletGroup) => total + group.denomination * group.count, 0) === value.score;
+}
+function matchSetup(value: unknown): value is MatchSetup {
+  if (!record(value) || value.totalDice !== 30 || !int(value.unusedDiceCount, 0, 30) || !int(value.placedDiceCount, 0, 30)
+    || !listOf(value.players, matchPlayer, 6) || value.players.length < 2) return false;
+  const ids = new Set(value.players.map(player => player.id));
+  const slots = new Set(value.players.map(player => player.slot));
+  return ids.size === value.players.length && slots.size === value.players.length
+    && value.players.reduce((total, player) => total + player.diceCount, value.unusedDiceCount + value.placedDiceCount) === value.totalDice;
 }
 function metrics(value: unknown): value is Metrics {
   if (!record(value) || !config(value)) return false;
@@ -194,12 +234,14 @@ export function readServerMessage(value: unknown): ServerMessage | null {
     case 'frame': return frame(value.frame) ? { type: 'frame', frame: value.frame } : null;
     case 'state':
       return gameState(value.state) && (value.roll === null || rollView(value.roll))
-        ? { type: 'state', state: value.state, roll: value.roll } : null;
+        && (value.match === undefined || matchSetup(value.match))
+        ? { type: 'state', state: value.state, roll: value.roll, ...(value.match === undefined ? {} : { match: value.match }) } : null;
     case 'welcome':
       return id(value.playerId) && typeof value.token === 'string' && tokenPattern.test(value.token)
         && typeof value.dev === 'boolean' && typeof value.view === 'boolean'
         && gameState(value.state) && (value.roll === null || rollView(value.roll))
-        ? { type: 'welcome', playerId: value.playerId, token: value.token, dev: value.dev, view: value.view, state: value.state, roll: value.roll }
+        && (value.match === undefined || matchSetup(value.match))
+        ? { type: 'welcome', playerId: value.playerId, token: value.token, dev: value.dev, view: value.view, state: value.state, roll: value.roll, ...(value.match === undefined ? {} : { match: value.match }) }
         : null;
     case 'metrics': return metrics(value.metrics) ? { type: 'metrics', metrics: value.metrics } : null;
     case 'error':

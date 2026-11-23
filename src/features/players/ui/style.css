@@ -344,7 +344,7 @@ body:has(.vip-dialog[open]) { overflow: hidden; }
 .vip-list-card[data-current="true"]::before { opacity: 1; }
 
 .player-cell { min-width: 0; display: grid; align-content: center; gap: 3px; }
-.player-name { font: 700 1.07rem/1.14 var(--vip-display); letter-spacing: .065em; overflow-wrap: anywhere; }
+.vip-list-card .player-name { font: 700 1.07rem/1.14 var(--vip-display); letter-spacing: .065em; overflow-wrap: anywhere; }
 
 .player-labels {
   display: flex;
@@ -620,7 +620,7 @@ body:has(.vip-dialog[open]) { overflow: hidden; }
   .vip-list-card { min-height: 68px; padding: 6px 6px; grid-template-columns: minmax(0, 1fr) 61px 31px 10px; gap: 5px; }
   .player-score { font-size: 1.4rem; }
   .player-score small { margin-left: 1px; font-size: .59rem; }
-  .player-name { font-size: .93rem; letter-spacing: .039em; }
+  .vip-list-card .player-name { font-size: .93rem; letter-spacing: .039em; }
   .player-dice { gap: 2px; font-size: .86rem; }
   .player-dice .dice-icon { width: 14px; height: 14px; }
   .vip-list-card .chevron-icon { width: 10px; }

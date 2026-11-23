@@ -77,6 +77,15 @@ body:has(.tray-dialog[open]) { overflow: hidden; }
   gap: clamp(12px, 2vw, 25px);
 }
 .game-board { min-width: 0; }
+.board-loading {
+  display: grid;
+  place-items: center;
+  min-height: clamp(330px, calc(100svh - 245px), 700px);
+  border: 1px solid #765234;
+  border-radius: 8px;
+  color: var(--salon-muted);
+  background: linear-gradient(145deg, #211710, #110d0b);
+}
 
 .turn-card {
   min-width: 0;

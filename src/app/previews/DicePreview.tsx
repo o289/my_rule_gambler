@@ -40,6 +40,7 @@ const boardAdapter: DiceBoardAdapter = {
   getDefinition: seed => seed === undefined ? legacyDefinition : createGoalBoard(seed),
   createState: createBoardState,
   onSelect,
+  requiresServerBoard: gameRoom,
 };
 
 export default function DicePreview() {

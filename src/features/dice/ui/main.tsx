@@ -11,6 +11,7 @@ import type { DiceResult, GameState, RollView } from '../../../shared/contracts/
 import { DiceConnection } from './connection';
 import type { ConnectionView } from './connection';
 import { PerformanceMonitor } from './monitor';
+import { MatchPanel } from './match-panel';
 import { DiceSound } from './sound';
 import { preloadDice } from './face-canvases';
 import { placementCandidates } from '../model/placement-feedback';
@@ -34,6 +35,7 @@ export interface DiceBoardAdapter {
   getDefinition: (seed: number | undefined) => BoardDefinition;
   createState: (definition: BoardDefinition, game: GameState | null) => BoardState;
   onSelect: (cell: CellAddress, context: DiceBoardContext) => void;
+  requiresServerBoard?: boolean;
 }
 
 function DiceIcon({ gem }: { gem: GemId }) {
@@ -188,6 +190,7 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
 
   const seat = game?.seats.find(item => item.id === info.playerId);
   const current = game?.seats.find(item => item.id === game.turnId);
+  const waitingForBoard = Boolean(boardAdapter.requiresServerBoard && game?.boardSeed === undefined);
   const devReroll = Boolean(info.dev && game && !game.placedThisRoll);
   const perf = <PerformanceMonitor info={info} fps={fps} own={own} expanded={monitor} expand={setMonitor}
     configure={config => connection.send({ type: 'config', config })} />;
@@ -200,8 +203,10 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
     <div className="salon-title"><h1>宝石サイコロ 3D</h1><span role="status">{seat?.name ?? (info.status === 'offline' ? '再接続中' : '接続中')} {seat && (own ? '・あなたの手番' : current ? `・${current.name} の手番` : '')}</span></div>
     <div className="table-layout">
       <div className="game-board">
-        <GamblerBoard board={definition} state={board} viewportRef={null} candidates={candidates}
-          onSelect={cell => boardAdapter.onSelect(cell, { game, roll, selected, canAct, inPlacement, board, definition })} />
+        {waitingForBoard
+          ? <div className="board-loading" role="status">共有盤面を読み込んでいます…</div>
+          : <GamblerBoard board={definition} state={board} viewportRef={null} candidates={candidates}
+            onSelect={cell => boardAdapter.onSelect(cell, { game, roll, selected, canAct, inPlacement, board, definition })} />}
       </div>
       <aside className="turn-card" aria-labelledby="turn-title">
         <div className="turn-heading"><h2 id="turn-title">ダイス操作</h2><span>{game?.seats.filter(item => item.online).length ?? 0}人 接続</span></div>
@@ -233,6 +238,7 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
         </div>
       </aside>
     </div>
+    <MatchPanel room={connection.room} match={info.match} turnId={game?.turnId ?? null} playerId={info.playerId} revision={game?.revision ?? 0} />
     {!info.tray && perf}
     <TrayDialog info={info} setFps={setFps} onClose={confirm} focusTarget={focusTarget} stream={connection.frames} onCup={cupSound}>{info.tray && perf}</TrayDialog>
   </main>;

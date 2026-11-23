@@ -423,7 +423,7 @@ button:disabled { cursor: default; }
   background: radial-gradient(ellipse at 50% 53%, #78501fc9, #301d12eb 77%), var(--marble) center / cover;
 }
 
-.player-name {
+.wallet-score .player-name {
   color: #edcca0;
   font: 700 .82rem var(--numerals);
   letter-spacing: .17em;
@@ -432,7 +432,7 @@ button:disabled { cursor: default; }
 
 .wallet-value { display: flex; align-items: baseline; justify-content: center; gap: 4px; }
 
-.score-value {
+.wallet-score .score-value {
   display: inline-block;
   color: #fbdc9e;
   font: 700 clamp(2.25rem, 6cqw, 3.25rem)/1.05 var(--numerals);
@@ -841,8 +841,8 @@ button:disabled { cursor: default; }
     align-content: center;
     gap: 6px;
   }
-  .player-name { font-size: .7rem; letter-spacing: .09em; }
-  .score-value { font-size: clamp(1.82rem, 8.4cqw, 2.48rem); }
+  .wallet-score .player-name { font-size: .7rem; letter-spacing: .09em; }
+  .wallet-score .score-value { font-size: clamp(1.82rem, 8.4cqw, 2.48rem); }
   .wallet-unit { font-size: .72rem; }
   .payment-delta { position: static; translate: none; font-size: clamp(.61rem, 3.05cqw, .91rem); justify-self: end; letter-spacing: .045em; }
   .wallet-tray { --tray-padding: 5px; --tray-inset-height: clamp(70px, 19cqw, 94px); }

@@ -1,5 +1,5 @@
 import { parseJson, readServerMessage, roomName } from '../../../shared/contracts/dice';
-import type { ClientMessage, Frame, GameState, Impact, Metrics, RollView, ServerMessage } from '../../../shared/contracts/dice';
+import type { ClientMessage, Frame, GameState, Impact, MatchSetup, Metrics, RollView, ServerMessage } from '../../../shared/contracts/dice';
 import { confirmedPlacement } from '../model/placement-feedback';
 import type { PlacementFeedback } from '../model/placement-feedback';
 
@@ -45,6 +45,7 @@ export interface ConnectionView {
   playerId: string | null;
   dev: boolean;
   game: GameState | null;
+  match: MatchSetup | null;
   roll: RollView | null;
   tray: string | null;
   problem: string;
@@ -54,7 +55,7 @@ export interface ConnectionView {
 }
 
 const HOLD: ConnectionView = {
-  status: 'connecting', playerId: null, dev: false, game: null, roll: null, tray: null,
+  status: 'connecting', playerId: null, dev: false, game: null, match: null, roll: null, tray: null,
   problem: '', metrics: null, pending: false, placement: null,
 };
 
@@ -142,7 +143,7 @@ export class DiceConnection {
         if (message.roll) this.frames.push(message.roll.latest);
         this.update({
           status: 'online', playerId: message.playerId, game: message.state, roll: message.roll,
-          dev: message.dev, tray: message.view ? message.roll?.id ?? null : null,
+          dev: message.dev, match: message.match ?? null, tray: message.view ? message.roll?.id ?? null : null,
           pending: false, problem: '', placement: null,
         });
         break;
@@ -150,7 +151,7 @@ export class DiceConnection {
         const newRoll = message.roll?.id !== this.current.roll?.id;
         if (message.roll) this.frames.push(message.roll.latest);
         this.update({
-          game: message.state, roll: message.roll, pending: false,
+          game: message.state, match: message.match ?? this.current.match, roll: message.roll, pending: false,
           placement: this.current.game?.boardSeed === message.state.boardSeed
             ? confirmedPlacement(this.current.game, message.state) ?? this.current.placement
             : null,

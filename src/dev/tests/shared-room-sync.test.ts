@@ -106,6 +106,10 @@ test('normal startup routes casino and dice sockets to the same Room and rejects
     assert.equal(diceFirst.dev, false);
     assert.deepEqual(diceFirst.state.seats.map(seat => seat.id), fixed?.map(seat => seat.id));
     assert.equal(diceFirst.state.boardSeed, diceSecond.state.boardSeed);
+    assert.deepEqual(diceFirst.match, diceSecond.match);
+    assert.equal(diceFirst.match?.players[0]?.score, 80);
+    assert.equal(diceFirst.match?.players[0]?.diceCount, 15);
+    assert.deepEqual(diceFirst.match?.players[0]?.wallet, [{ denomination: 50, count: 1 }, { denomination: 10, count: 3 }]);
 
     const excluded = new DiceClient(servers.dicePort);
     sockets.push(excluded.socket);

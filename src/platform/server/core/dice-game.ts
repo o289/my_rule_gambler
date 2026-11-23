@@ -140,9 +140,10 @@ export function beginRoll(
   kind: 'initial' | 'reroll',
   count: number,
   previousDice: readonly { id: string }[],
+  initialDiceIds?: readonly string[],
 ): { state: DiceGameState; diceIds: string[] } {
   const diceIds = kind === 'initial'
-    ? Array.from({ length: count }, (_, index) => `die-${index + 1}`)
+    ? [...(initialDiceIds ?? Array.from({ length: count }, (_, index) => `die-${index + 1}`))].slice(0, count)
     : previousDice.filter(die => state.remaining.includes(die.id)).map(die => die.id);
   return {
     state: { ...state, phase: 'rolling', rollId },
@@ -172,7 +173,7 @@ export function placeDie(
     || (command.column !== undefined && column !== command.column)) {
     return { status: 'invalid', state };
   }
-  const board = new Map(state.board).set(cellKey(open), { row: command.row, column, gem: die.gem });
+  const board = new Map(state.board).set(cellKey(open), { row: command.row, column, gem: die.gem, dieId: die.id });
   return {
     status: 'placed',
     state: {
