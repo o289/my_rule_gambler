@@ -29,10 +29,11 @@ class Guest implements RoomPeer {
 }
 
 const countdownMs = 45;
+const roomInfo = { id: 'test', name: 'テスト卓' };
 
 function join(room: CasinoRoom, token?: string) {
   const guest = new Guest();
-  room.join(guest, { type: 'join', room: 'test', token });
+  room.join(guest, token);
   return guest;
 }
 
@@ -42,7 +43,7 @@ function ready(room: CasinoRoom, guest: Guest, value = true) {
 
 test('only all-ready groups of two to six start, with a shared deadline and unique stable slots', async () => {
   for (let count = MIN_PLAYERS; count <= MAX_PLAYERS; count += 1) {
-    const room = new CasinoRoom(countdownMs);
+    const room = new CasinoRoom(roomInfo, countdownMs);
     try {
       const guests = Array.from({ length: count }, () => join(room));
       const host = guests[0];
@@ -75,10 +76,8 @@ test('only all-ready groups of two to six start, with a shared deadline and uniq
       ready(room, last, false);
       assert.equal(last.state.phase, 'started');
       const fixedStartOrder = last.state.startedPlayers;
-      if (count < MAX_PLAYERS) {
-        const lateJoiner = join(room);
-        assert.deepEqual(lateJoiner.state.startedPlayers, fixedStartOrder);
-      }
+      const lateJoiner = join(room);
+      assert.ok(lateJoiner.seen.some(message => message.type === 'error' && message.code === 'STARTED'));
       room.exit(guests[0]!.welcome.playerId, guests[0]!);
       assert.deepEqual(last.state.startedPlayers, fixedStartOrder, 'later exits do not change the frozen start order');
     } finally { room.dispose(); }
@@ -86,7 +85,7 @@ test('only all-ready groups of two to six start, with a shared deadline and uniq
 });
 
 test('starting is blocked alone and cancelled by participation changes, with stable reconnect identity', async () => {
-  const room = new CasinoRoom(countdownMs);
+  const room = new CasinoRoom(roomInfo, countdownMs);
   try {
     const a = join(room);
     ready(room, a);
@@ -126,17 +125,16 @@ test('starting is blocked alone and cancelled by participation changes, with sta
     assert.equal(a.state.phase, 'countdown', 'obsolete socket close cannot cancel');
     await delay(countdownMs + 15);
     assert.equal(a.state.phase, 'started');
-    const newcomer = join(room);
-    assert.equal(newcomer.state.phase, 'started');
-    assert.equal(newcomer.state.seats[2]?.slot, 2);
-    assert.deepEqual(newcomer.state.startedPlayers, a.state.startedPlayers);
+    const startedReturn = join(room, b.welcome.token);
+    assert.equal(startedReturn.state.phase, 'started');
+    assert.deepEqual(startedReturn.state.startedPlayers, a.state.startedPlayers);
     room.exit(a.welcome.playerId, a);
-    assert.equal(replacement.state.hostId, replacement.welcome.playerId);
+    assert.equal(startedReturn.state.hostId, startedReturn.welcome.playerId);
   } finally { room.dispose(); }
 });
 
 test('an unready departure while waiting automatically starts an eligible group', async () => {
-  const room = new CasinoRoom(countdownMs);
+  const room = new CasinoRoom(roomInfo, countdownMs);
   try {
     const first = join(room);
     const second = join(room);
@@ -156,4 +154,14 @@ test('READY packets accept explicit booleans only', () => {
   assert.equal(readClientMessage({ type: 'ready', ready: 1 }), null);
   assert.equal(readClientMessage({ type: 'ready' }), null);
   assert.equal(readClientMessage({ type: 'clock', sentAt: -1 }), null);
+});
+
+test('room entry packets distinguish creating a named room from looking up an ID', () => {
+  assert.deepEqual(readClientMessage({ type: 'create', name: '  夜のサロン  ' }), { type: 'create', name: '夜のサロン' });
+  assert.equal(readClientMessage({ type: 'create', name: ' ' }), null);
+  assert.equal(readClientMessage({ type: 'create', name: 'table\u0007' }), null);
+  assert.equal(readClientMessage({ type: 'create', name: '卓'.repeat(33) }), null);
+  assert.deepEqual(readClientMessage({ type: 'join', room: ' AB12CF34 ' }), { type: 'join', room: 'ab12cf34', token: undefined });
+  assert.equal(readClientMessage({ type: 'join', room: 'サロン?' }), null);
+  assert.equal(readClientMessage({ type: 'join', room: '' }), null);
 });

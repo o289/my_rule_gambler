@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
@@ -39,7 +40,6 @@ export async function startCasinoServer(options: HttpOptions) {
   sockets.on('connection', socket => {
     let room: CasinoRoom | null = null;
     let id: string | null = null;
-    let name: string | null = null;
     let windowStart = performance.now();
     let packets = 0;
     alive.add(socket);
@@ -76,33 +76,42 @@ export async function startCasinoServer(options: HttpOptions) {
         peer.send({ type: 'error', code: 'INPUT', message: '操作の形式を確認してください。' });
         return;
       }
-      if (message.type === 'join' && !room) {
-        const existing = rooms.get(message.room);
-        if (!existing && message.token) {
-          peer.send({ type: 'error', code: 'TOKEN', message: '前回のセッションは終了しています。' });
-          socket.close(1008, 'session expired');
-          return;
-        }
-        if (!existing && rooms.size >= MAX_ROOMS) {
-          peer.send({ type: 'error', code: 'BUSY', message: '現在、新しいルームに参加できません。' });
-          socket.close(1013, 'room limit');
-          return;
-        }
-        room = existing ?? new CasinoRoom();
-        rooms.set(message.room, room);
-        name = message.room;
-        id = room.join(peer, message);
+      if (!room && (message.type === 'create' || message.type === 'join')) {
         clearTimeout(joinDeadline);
-        if (!id) socket.close(message.token ? 1008 : 4003, 'join rejected');
+        if (message.type === 'create') {
+          if (rooms.size >= MAX_ROOMS) {
+            peer.send({ type: 'error', code: 'BUSY', message: '現在、新しいルームを作成できません。' });
+            socket.close(1013, 'room limit');
+            return;
+          }
+          let roomId = randomBytes(4).toString('hex');
+          while (rooms.has(roomId)) roomId = randomBytes(4).toString('hex');
+          room = new CasinoRoom({ id: roomId, name: message.name });
+          rooms.set(roomId, room);
+          id = room.join(peer);
+        } else {
+          const existing = rooms.get(message.room);
+          if (!existing) {
+            const error = message.token
+              ? { code: 'TOKEN', message: '前回のセッションは終了しています。' }
+              : { code: 'NOT_FOUND', message: 'ルームが見つかりません。IDを確認してください。' };
+            peer.send({ type: 'error', ...error });
+            socket.close(4003, 'room not found');
+            return;
+          }
+          room = existing;
+          id = room.join(peer, message.token);
+        }
+        if (!id) socket.close(4003, 'join rejected');
       } else if (room && id && message.type === 'leave') {
         room.exit(id, peer);
-        if (name && room.empty) {
+        if (room.empty) {
+          rooms.delete(room.info.id);
           room.dispose();
-          rooms.delete(name);
         }
         id = null;
         socket.close(1000, 'left room');
-      } else if (room && id && message.type !== 'join' && message.type !== 'leave') {
+      } else if (room && id && (message.type === 'ready' || message.type === 'clock')) {
         room.command(id, peer, message);
       }
     });

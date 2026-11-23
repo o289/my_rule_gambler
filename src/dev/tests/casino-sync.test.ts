@@ -4,7 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { WebSocket } from 'ws';
 import { startCasinoServer } from '../../platform/local-demo-servers/casino-entry/server/http';
-import { COUNTDOWN_MS, parseJson, readServerMessage } from '../../shared/contracts/casino-entry';
+import { COUNTDOWN_MS, MAX_PLAYERS, parseJson, readServerMessage } from '../../shared/contracts/casino-entry';
 import type { ClientMessage, ServerMessage } from '../../shared/contracts/casino-entry';
 
 class Client {
@@ -33,11 +33,13 @@ class Client {
     throw new Error(`WebSocket timeout waiting for ${type}`);
   }
 
-  async join(token?: string) {
+  async start(message: ClientMessage) {
     if (this.socket.readyState !== WebSocket.OPEN) await once(this.socket, 'open');
-    this.send({ type: 'join', room: 'test-salon', token });
-    return this.wait('welcome');
+    this.send(message);
   }
+
+  async create(name: string) { await this.start({ type: 'create', name }); return this.wait('welcome'); }
+  async join(room: string, token?: string) { await this.start({ type: 'join', room, token }); return this.wait('welcome'); }
 
   async close() {
     const closing = once(this.socket, 'close');
@@ -51,8 +53,12 @@ test('the independent casino server starts two clients from the same deadline an
   try {
     const host = new Client(server.port);
     const guest = new Client(server.port);
-    const first = await host.join();
-    const second = await guest.join();
+    const first = await host.create('夜のサロン');
+    const room = first.room.id;
+    const second = await guest.join(room.toUpperCase());
+    assert.match(room, /^[a-f\d]{8}$/);
+    assert.deepEqual(first.room, { id: room, name: '夜のサロン' });
+    assert.deepEqual(second.room, first.room);
     assert.equal(first.state.phase, 'waiting');
     assert.equal(second.state.hostId, first.playerId);
     assert.deepEqual(second.state.seats.map(seat => seat.slot), [0, 1]);
@@ -86,7 +92,7 @@ test('the independent casino server starts two clients from the same deadline an
     next = host.received.length;
 
     const newcomer = new Client(server.port);
-    const added = await newcomer.join();
+    const added = await newcomer.join(room);
     assert.equal(added.state.phase, 'waiting');
     assert.equal(added.state.seats.length, 3);
     await host.wait('state', event => event.state.phase === 'waiting' && event.state.seats.length === 3, next);
@@ -99,7 +105,7 @@ test('the independent casino server starts two clients from the same deadline an
     await host.wait('state', event => event.state.seats[1]?.online === false, next);
 
     const resumed = new Client(server.port);
-    const welcome = await resumed.join(second.token);
+    const welcome = await resumed.join(room, second.token);
     assert.equal(welcome.playerId, second.playerId);
     assert.equal(welcome.state.seats[1]?.ready, true);
     assert.equal(welcome.state.phase, 'countdown');
@@ -112,11 +118,55 @@ test('the independent casino server starts two clients from the same deadline an
     assert.deepEqual(startedHost.state, startedGuest.state);
     assert.equal(startedHost.state.startAt, null);
     assert.equal(host.received.filter(event => event.type === 'state' && event.state.phase === 'started').length, 1);
+    const denied = new Client(server.port);
+    await denied.start({ type: 'join', room });
+    await denied.wait('error', event => event.code === 'STARTED');
     await resumed.close();
     const returned = new Client(server.port);
-    const finished = await returned.join(second.token);
+    const finished = await returned.join(room, second.token);
     assert.equal(finished.playerId, second.playerId);
     assert.equal(finished.state.phase, 'started');
+    assert.deepEqual(finished.room, first.room);
     assert.deepEqual(finished.state.startedPlayers?.map(seat => seat.id), startedHost.state.startedPlayers?.map(seat => seat.id));
+  } finally { server.close(); }
+});
+
+test('only creation allocates a room and denied joins leave its seat list intact', { timeout: 5_000 }, async () => {
+  const server = await startCasinoServer({ port: 0 });
+  try {
+    const invalid = new Client(server.port);
+    await invalid.start({ type: 'join', room: 'ROOM?' });
+    await invalid.wait('error', event => event.code === 'INPUT');
+    const missing = new Client(server.port);
+    await missing.start({ type: 'join', room: 'not-a-room' });
+    await missing.wait('error', event => event.code === 'NOT_FOUND');
+    const first = new Client(server.port);
+    const second = new Client(server.port);
+    const { room } = await first.create('同じ名前');
+    const other = await second.create('同じ名前');
+    assert.notEqual(other.room.id, room.id);
+    assert.equal(other.state.seats.length, 1);
+
+    for (let seat = 1; seat < MAX_PLAYERS; seat += 1) {
+      const guest = new Client(server.port);
+      const welcome = await guest.join(room.id);
+      assert.equal(welcome.state.seats.length, seat + 1);
+      assert.deepEqual(welcome.room, room);
+    }
+    const denied = new Client(server.port);
+    await denied.start({ type: 'join', room: room.id });
+    await denied.wait('error', event => event.code === 'FULL');
+    assert.equal(denied.received.some(event => event.type === 'welcome'), false);
+    const full = await first.wait('state', event => event.state.seats.length === MAX_PLAYERS);
+    assert.ok(full.state.seats.every(seat => seat.online));
+
+    const leaving = new Client(server.port);
+    const made = await leaving.create('退出する卓');
+    const closed = once(leaving.socket, 'close');
+    leaving.send({ type: 'leave' });
+    await closed;
+    const afterExit = new Client(server.port);
+    await afterExit.start({ type: 'join', room: made.room.id });
+    await afterExit.wait('error', event => event.code === 'NOT_FOUND');
   } finally { server.close(); }
 });

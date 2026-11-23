@@ -19,7 +19,7 @@ const options: readonly { id: PreviewId; label: string; description: string }[] 
   { id: 'board', label: 'ボード', description: '盤面、配置、得点演出' },
   { id: 'effects', label: 'エフェクト', description: '停止、配置、勝利演出' },
   { id: 'players', label: 'プレイヤー', description: 'VIP 情報、順位、通知' },
-  { id: 'casino', label: 'カジノエントリー', description: '入場、着席、READY' },
+  { id: 'casino', label: 'カジノエントリー', description: '入場、ルーム作成・参加、READY' },
   { id: 'bank', label: 'バンク', description: 'コインと金庫の取引演出' },
 ];
 
@@ -44,7 +44,7 @@ function App() {
   if (!showList) {
     const Casino = previews.casino;
     return <Suspense fallback={<div className="preview-loading" role="status">カジノを読み込んでいます…</div>}>
-      <Casino key={new URLSearchParams(location.search).get('room') ?? 'salon'} />
+      <Casino />
     </Suspense>;
   }
 

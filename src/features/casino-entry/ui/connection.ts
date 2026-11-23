@@ -1,82 +1,148 @@
-import { parseJson, readServerMessage, roomName } from '../../../shared/contracts/casino-entry';
-import type { ClientMessage, LobbyState, ServerMessage } from '../../../shared/contracts/casino-entry';
+import { parseJson, parseRoomId, parseRoomName, readServerMessage } from '../../../shared/contracts/casino-entry';
+import type { CasinoRoomInfo, ClientMessage, LobbyState, ServerMessage } from '../../../shared/contracts/casino-entry';
 
 export interface ConnectionView {
-  status: 'connecting' | 'online' | 'offline';
+  status: 'idle' | 'connecting' | 'online' | 'offline';
   playerId: string | null;
+  room: CasinoRoomInfo | null;
   lobby: LobbyState | null;
   problem: string;
   clockOffset: number;
 }
 
+export type Admission = { ok: true; room: CasinoRoomInfo } | { ok: false; problem: string };
+
+export interface CasinoRoomTransport {
+  getSnapshot(): ConnectionView;
+  subscribe(listener: () => void): () => void;
+  create(name: string): Promise<Admission>;
+  join(roomId: string): Promise<Admission>;
+  restore(roomId?: string): Promise<Admission> | undefined;
+  setReady(ready: boolean): void;
+  exit(): void;
+  stop(): void;
+}
+
 const HOLD: ConnectionView = {
-  status: 'connecting', playerId: null, lobby: null, problem: '', clockOffset: 0,
+  status: 'idle', playerId: null, room: null, lobby: null, problem: '', clockOffset: 0,
 };
 
-export class CasinoConnection {
-  readonly room: string;
+const SESSION_ROOM = 'atelier-noir-casino-entry-last-room';
+const NO_CONNECTION = 'ルームに接続できませんでした。もう一度お試しください。';
+const ADMISSION_TIMEOUT_MS = 6000;
+const tokenKey = (room: string) => `atelier-noir-casino-entry:${room}`;
+
+type Join = Extract<ClientMessage, { type: 'join' }>;
+type Access = Extract<ClientMessage, { type: 'create' | 'join' }>;
+type Session = { roomId: string; token: string };
+type Pending = { complete: (result: Admission) => void; timeout: number };
+
+export class CasinoConnection implements CasinoRoomTransport {
   private current = HOLD;
   private socket: WebSocket | null = null;
   private retry: number | undefined;
   private delay = 290;
-  private active = false;
   private ping: number | undefined;
   private sentAt = 0;
-  private token: string | undefined;
+  private session: Session | null = null;
+  private pending: Pending | null = null;
   private listeners = new Set<() => void>();
-  private readonly key: string;
 
-  constructor(room: string) {
-    this.room = roomName(room);
-    this.key = `atelier-noir-casino-entry:${this.room}`;
-    try { this.token = sessionStorage.getItem(this.key) ?? undefined; }
-    catch { this.token = undefined; }
-  }
+  constructor(private readonly url: string) {}
 
   getSnapshot = () => this.current;
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => { this.listeners.delete(listener); };
   };
+
   private update(patch: Partial<ConnectionView>) {
     this.current = { ...this.current, ...patch };
     for (const listener of this.listeners) listener();
   }
 
-  hasSession() { return Boolean(this.token); }
-
-  private clearToken() {
-    this.token = undefined;
-    try { sessionStorage.removeItem(this.key); }
-    catch { return false; }
-    return true;
+  create(input: string): Promise<Admission> {
+    const name = parseRoomName(input);
+    return name ? this.admit({ type: 'create', name })
+      : Promise.resolve({ ok: false, problem: 'ルーム名を1〜32文字で入力してください。' });
   }
 
-  exit() {
-    this.send({ type: 'leave' });
-    this.stop();
-    this.clearToken();
+  join(input: string): Promise<Admission> {
+    const room = parseRoomId(input);
+    return room ? this.admit({ type: 'join', room })
+      : Promise.resolve({ ok: false, problem: 'ルームIDを半角英数字で入力してください。' });
+  }
+
+  restore(hint?: string) {
+    try {
+      const input = hint ?? sessionStorage.getItem(SESSION_ROOM);
+      const room = input && parseRoomId(input);
+      if (!room) return undefined;
+      const token = sessionStorage.getItem(tokenKey(room));
+      return token ? this.admit({ type: 'join', room, token }) : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private admit(request: Access): Promise<Admission> {
+    if (this.pending || this.session) return Promise.resolve({ ok: false, problem: 'ルームへの接続を処理中です。' });
+    this.delay = 290;
+    return new Promise(resolve => {
+      const pending = { complete: resolve, timeout: window.setTimeout(() => this.reject(NO_CONNECTION), ADMISSION_TIMEOUT_MS) };
+      this.pending = pending;
+      this.update({ ...HOLD, status: 'connecting' });
+      if (this.pending === pending) this.connect(request);
+    });
+  }
+
+  private finishAdmission(result: Admission) {
+    const pending = this.pending;
+    if (!pending) return;
+    this.pending = null;
+    window.clearTimeout(pending.timeout);
+    pending.complete(result);
+  }
+
+  private reject(problem: string) {
+    this.disconnect();
+    this.finishAdmission({ ok: false, problem });
     this.update(HOLD);
   }
 
-  setReady(ready: boolean) {
-    if (this.current.status !== 'online' || this.current.lobby?.phase === 'started') return;
-    this.send({ type: 'ready', ready });
+  private remember(session: Session) {
+    try {
+      sessionStorage.setItem(tokenKey(session.roomId), session.token);
+      sessionStorage.setItem(SESSION_ROOM, session.roomId);
+    } catch {
+      // The live connection still retains the token when storage is unavailable.
+    }
   }
 
-  private syncClock() {
-    this.sentAt = Date.now();
-    this.send({ type: 'clock', sentAt: this.sentAt });
+  private forget(roomId: string) {
+    try {
+      sessionStorage.removeItem(tokenKey(roomId));
+      if (sessionStorage.getItem(SESSION_ROOM) === roomId) sessionStorage.removeItem(SESSION_ROOM);
+    } catch {
+      // Removing the live session still prevents another reconnect.
+    }
   }
 
-  start() {
-    if (this.active) return;
-    this.active = true;
-    this.connect();
+  exit() {
+    const id = this.session?.roomId ?? this.current.room?.id;
+    if (id) this.forget(id);
+    this.send({ type: 'leave' });
+    this.stop();
   }
 
   stop() {
-    this.active = false;
+    this.session = null;
+    this.disconnect();
+    this.finishAdmission({ ok: false, problem: NO_CONNECTION });
+    this.update(HOLD);
+  }
+
+  private disconnect() {
     window.clearTimeout(this.retry);
     window.clearInterval(this.ping);
     const socket = this.socket;
@@ -84,47 +150,78 @@ export class CasinoConnection {
     socket?.close();
   }
 
-  private connect() {
-    if (!this.active) return;
-    this.update({ status: 'connecting' });
-    const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${scheme}//${location.host}/casino-ws`);
+  setReady(ready: boolean) {
+    if (this.current.status === 'online' && this.current.lobby?.phase !== 'started') this.send({ type: 'ready', ready });
+  }
+
+  private syncClock() {
+    this.sentAt = Date.now();
+    this.send({ type: 'clock', sentAt: this.sentAt });
+  }
+
+  private reconnect() {
+    this.update({ status: 'offline' });
+    const session = this.session;
+    if (!session) return;
+    const request: Join = { type: 'join', room: session.roomId, token: session.token };
+    this.retry = window.setTimeout(() => {
+      if (this.session !== session) return;
+      this.update({ status: 'connecting' });
+      this.connect(request);
+    }, this.delay);
+    this.delay = Math.min(3000, this.delay * 1.7);
+  }
+
+  private connect(request: Access) {
+    let socket: WebSocket;
+    try {
+      socket = new WebSocket(this.url);
+    } catch {
+      if (this.pending) this.reject(NO_CONNECTION);
+      else this.reconnect();
+      return;
+    }
     this.socket = socket;
     socket.addEventListener('open', () => {
-      if (this.socket !== socket) return;
-      this.send({ type: 'join', room: this.room, token: this.token });
+      if (this.socket === socket) this.send(request);
     });
     socket.addEventListener('message', event => {
       if (this.socket !== socket || typeof event.data !== 'string') return;
       const message = readServerMessage(parseJson(event.data));
-      if (message) this.receive(message);
+      if (message) this.receive(message, request);
     });
     socket.addEventListener('close', event => {
       if (this.socket !== socket) return;
       this.socket = null;
       window.clearInterval(this.ping);
-      this.update({ status: 'offline' });
-      if (!this.active || event.code === 4001 || event.code === 4003) return;
-      this.retry = window.setTimeout(() => this.connect(), this.delay);
-      this.delay = Math.min(3000, this.delay * 1.7);
+      if (this.pending) {
+        this.reject(NO_CONNECTION);
+        return;
+      }
+      if (event.code === 4001 || event.code === 4003) {
+        this.session = null;
+        this.update({ status: 'offline', problem: this.current.problem || 'このルームの接続が終了しました。' });
+        return;
+      }
+      this.reconnect();
     });
   }
 
-  private receive(message: ServerMessage) {
+  private receive(message: ServerMessage, request: Access) {
     switch (message.type) {
       case 'welcome':
         this.delay = 290;
-        this.token = message.token;
-        try { sessionStorage.setItem(this.key, message.token); }
-        catch { this.update({ problem: 'このタブを開いたまま再接続できます。' }); }
+        this.session = { roomId: message.room.id, token: message.token };
+        this.remember(this.session);
         this.update({
-          status: 'online', playerId: message.playerId, lobby: message.state, problem: '',
+          status: 'online', playerId: message.playerId, room: message.room, lobby: message.state, problem: '',
           clockOffset: message.state.serverTime - Date.now(),
         });
         if (message.state.phase !== 'started') {
           this.syncClock();
           this.ping = window.setInterval(() => this.syncClock(), 8000);
         }
+        this.finishAdmission({ ok: true, room: message.room });
         break;
       case 'clock': {
         const arrived = Date.now();
@@ -139,14 +236,15 @@ export class CasinoConnection {
         this.update({ lobby: message.state, problem: '' });
         break;
       case 'error':
-        if (message.code === 'TOKEN') this.clearToken();
-        this.update({ problem: message.message });
+        if (message.code === 'TOKEN' && request.type === 'join') this.forget(request.room);
+        if (this.pending) this.reject(message.message);
+        else this.update({ problem: message.message });
+        break;
     }
   }
 
   private send(message: ClientMessage) {
-    if (this.socket?.readyState !== WebSocket.OPEN) return false;
+    if (this.socket?.readyState !== WebSocket.OPEN) return;
     this.socket.send(JSON.stringify(message));
-    return true;
   }
 }

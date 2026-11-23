@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { COUNTDOWN_MS, MAX_PLAYERS, MIN_PLAYERS } from '../../../../shared/contracts/casino-entry';
-import type { ClientMessage, LobbyState, Seat, ServerMessage } from '../../../../shared/contracts/casino-entry';
+import type { CasinoRoomInfo, ClientMessage, LobbyState, Seat, ServerMessage } from '../../../../shared/contracts/casino-entry';
 
 export const SESSION_GRACE_MS = 90_000;
 
@@ -25,7 +25,7 @@ export class CasinoRoom {
   private started = false;
   private startedPlayers: Seat[] | null = null;
 
-  constructor(private readonly countdownMs = COUNTDOWN_MS) {}
+  constructor(readonly info: CasinoRoomInfo, private readonly countdownMs = COUNTDOWN_MS) {}
 
   get empty() { return this.members.length === 0; }
 
@@ -76,13 +76,17 @@ export class CasinoRoom {
     for (const member of this.members) member.peer?.send({ type: 'state', state });
   }
 
-  join(peer: RoomPeer, { token }: Extract<ClientMessage, { type: 'join' }>) {
+  join(peer: RoomPeer, token?: string) {
     let member = token ? this.members.find(item => item.token === token) : undefined;
     if (token && !member) {
-      peer.send({ type: 'error', code: 'TOKEN', message: '再接続の期間が終了しました。新しいプレイヤーとして参加します。' });
+      peer.send({ type: 'error', code: 'TOKEN', message: '再接続の期間が終了しました。ルームを選んでください。' });
       return null;
     }
     if (!member) {
+      if (this.started) {
+        peer.send({ type: 'error', code: 'STARTED', message: 'このルームはすでにゲームを開始しています。' });
+        return null;
+      }
       if (this.members.length >= MAX_PLAYERS) {
         peer.send({ type: 'error', code: 'FULL', message: 'このルームの定員は6名です。' });
         return null;
@@ -100,7 +104,7 @@ export class CasinoRoom {
 
     if (!prior && !this.cancelCountdown()) this.checkReady();
 
-    peer.send({ type: 'welcome', playerId: member.id, token: member.token, state: this.state() });
+    peer.send({ type: 'welcome', playerId: member.id, token: member.token, room: this.info, state: this.state() });
     this.update();
     return member.id;
   }

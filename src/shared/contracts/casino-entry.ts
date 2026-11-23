@@ -1,6 +1,10 @@
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 6;
 export const COUNTDOWN_MS = 3000;
+export const ROOM_NAME_MAX = 32;
+export const ROOM_ID_MAX = 32;
+
+export interface CasinoRoomInfo { id: string; name: string }
 
 export interface Seat { id: string; name: string; online: boolean; slot: number; ready: boolean }
 export interface LobbyState {
@@ -14,13 +18,14 @@ export interface LobbyState {
 }
 
 export type ClientMessage =
+  | { type: 'create'; name: string }
   | { type: 'join'; room: string; token?: string }
   | { type: 'ready'; ready: boolean }
   | { type: 'leave' }
   | { type: 'clock'; sentAt: number };
 
 export type ServerMessage =
-  | { type: 'welcome'; playerId: string; token: string; state: LobbyState }
+  | { type: 'welcome'; playerId: string; token: string; room: CasinoRoomInfo; state: LobbyState }
   | { type: 'state'; state: LobbyState }
   | { type: 'clock'; sentAt: number; serverNow: number }
   | { type: 'error'; code: string; message: string };
@@ -39,17 +44,33 @@ function int(value: unknown, maximum = Number.MAX_SAFE_INTEGER): value is number
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= maximum;
 }
 
-export function roomName(input: string) {
+export function parseRoomId(input: string) {
   const value = input.trim().toLowerCase();
-  return roomPattern.test(value) ? value : 'salon';
+  return roomPattern.test(value) ? value : null;
+}
+
+export function parseRoomName(input: string) {
+  const value = input.trim();
+  return value.length > 0 && value.length <= ROOM_NAME_MAX && !/\p{Cc}/u.test(value) ? value : null;
+}
+
+function roomInfo(value: unknown): value is CasinoRoomInfo {
+  return record(value) && typeof value.id === 'string' && parseRoomId(value.id) === value.id
+    && typeof value.name === 'string' && parseRoomName(value.name) === value.name;
 }
 
 export function readClientMessage(value: unknown): ClientMessage | null {
   if (!record(value)) return null;
   switch (value.type) {
-    case 'join':
-      return typeof value.room === 'string' && roomPattern.test(value.room) && (value.token === undefined || token(value.token))
-        ? { type: 'join', room: value.room, token: value.token } : null;
+    case 'create': {
+      const name = typeof value.name === 'string' ? parseRoomName(value.name) : null;
+      return name ? { type: 'create', name } : null;
+    }
+    case 'join': {
+      const room = typeof value.room === 'string' ? parseRoomId(value.room) : null;
+      return room && (value.token === undefined || token(value.token))
+        ? { type: 'join', room, token: value.token } : null;
+    }
     case 'ready': return typeof value.ready === 'boolean' ? { type: 'ready', ready: value.ready } : null;
     case 'leave': return { type: 'leave' };
     case 'clock': return int(value.sentAt) ? { type: 'clock', sentAt: value.sentAt } : null;
@@ -76,8 +97,8 @@ export function readServerMessage(value: unknown): ServerMessage | null {
   if (!record(value)) return null;
   switch (value.type) {
     case 'welcome':
-      return id(value.playerId) && token(value.token) && lobbyState(value.state)
-        ? { type: 'welcome', playerId: value.playerId, token: value.token, state: value.state } : null;
+      return id(value.playerId) && token(value.token) && roomInfo(value.room) && lobbyState(value.state)
+        ? { type: 'welcome', playerId: value.playerId, token: value.token, room: value.room, state: value.state } : null;
     case 'state': return lobbyState(value.state) ? { type: 'state', state: value.state } : null;
     case 'clock':
       return int(value.sentAt) && int(value.serverNow) ? { type: 'clock', sentAt: value.sentAt, serverNow: value.serverNow } : null;

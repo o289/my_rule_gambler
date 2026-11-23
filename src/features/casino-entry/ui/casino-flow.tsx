@@ -1,18 +1,28 @@
 import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { TransitionEvent } from 'react';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../../../shared/contracts/casino-entry';
-import type { Seat } from '../../../shared/contracts/casino-entry';
-import type { CasinoConnection, ConnectionView } from './connection';
-import type { EntranceSound } from './sound';
+import type { CasinoRoomInfo, Seat } from '../../../shared/contracts/casino-entry';
+import type { Admission, CasinoRoomTransport, ConnectionView } from './connection';
+import { CasinoDoors, DOOR_FALLBACK_MS, RoomDoor, ROOM_UNLOCK_MS } from './casino-doors';
+import { RoomChooser } from './room-chooser';
+import type { RoomAction, RoomProblem } from './room-chooser';
 import { casinoAssets, entranceGems } from './casino-assets';
 import { releaseDecodedImages } from './asset-loader';
 import './casino.css';
 
 export type CasinoPhase =
-  | 'LOADING' | 'READY_TO_ENTER' | 'DOOR_OPENING' | 'LOAD_ERROR'
+  | 'LOADING' | 'READY_TO_ENTER' | 'DOOR_OPENING' | 'LOAD_ERROR' | 'RESTORING'
+  | 'ROOM_SELECT' | 'ROOM_CONNECTING' | 'ROOM_UNLOCKING' | 'ROOM_OPENING' | 'ROOM_CLOSING'
   | 'LOBBY_WAITING' | 'COUNTDOWN' | 'IN_GAME';
-type EntrancePhase = Extract<CasinoPhase, 'LOADING' | 'READY_TO_ENTER' | 'DOOR_OPENING' | 'LOAD_ERROR'> | 'ENTERED';
+type Scene = Exclude<CasinoPhase, 'LOBBY_WAITING' | 'COUNTDOWN' | 'IN_GAME'> | 'ENTERED';
+
+interface CasinoSound {
+  unlock(): void;
+  cut(): void;
+  playDoor(): void;
+  playLatch(): void;
+  playClose(): void;
+}
 
 const countdownSteps = 3;
 const slots = Array.from({ length: MAX_PLAYERS }, (_, slot) => slot);
@@ -62,12 +72,12 @@ function CountdownChip({ deadline, offset, exiting }: { deadline: number; offset
   </div>;
 }
 
-function VipLobby({ info, room, setReady, leave, opening, deadline }: {
+function VipLobby({ info, room, setReady, leave, blocked, deadline }: {
   info: ConnectionView;
-  room: string;
+  room: CasinoRoomInfo;
   setReady: (ready: boolean) => void;
   leave: () => void;
-  opening: boolean;
+  blocked: boolean;
   deadline: number | null;
 }) {
   const { lobby, playerId, status, problem, clockOffset } = info;
@@ -79,16 +89,16 @@ function VipLobby({ info, room, setReady, leave, opening, deadline }: {
     : joined.length < MIN_PLAYERS ? 'もうひとりの参加を待っています'
       : deadline ? 'まもなくゲームが始まります' : '全員の準備が揃うとゲームが始まります');
 
-  useEffect(() => { if (!opening) title.current?.focus({ preventScroll: true }); }, [opening]);
+  useEffect(() => { if (!blocked) title.current?.focus({ preventScroll: true }); }, [blocked]);
 
-  return <main className="vip-lobby" id="vip-lobby" inert={opening}>
+  return <main className="vip-lobby" id="vip-lobby" inert={blocked}>
     <div className="vip-panel">
       <header className="vip-heading">
         <button className="casino-plain vip-exit" id="leave-lobby" onClick={leave}>退出</button>
         <div className="vip-title">
           <Crest className="vip-crown" />
           <h1 ref={title} tabIndex={-1}>VIP LOUNGE</h1>
-          <p className="vip-room">ROOM <strong>{room}</strong></p>
+          <RoomIdentity room={room} />
         </div>
       </header>
       <div className="vip-table-layout" aria-label="参加席">
@@ -113,15 +123,22 @@ function VipLobby({ info, room, setReady, leave, opening, deadline }: {
   </main>;
 }
 
-function CasinoStarted({ room, players, leave }: { room: string; players: readonly Seat[]; leave: () => void }) {
+function RoomIdentity({ room }: { room: CasinoRoomInfo }) {
+  return <div className="vip-room">
+    <strong>{room.name}</strong>
+    <span>ルームID <code id="lobby-room-id">{room.id.toUpperCase()}</code></span>
+  </div>;
+}
+
+function CasinoStarted({ room, players, leave, blocked }: { room: CasinoRoomInfo; players: readonly Seat[]; leave: () => void; blocked: boolean }) {
   const title = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { title.current?.focus({ preventScroll: true }); }, []);
-  return <main className="vip-lobby" id="casino-started">
+  useEffect(() => { if (!blocked) title.current?.focus({ preventScroll: true }); }, [blocked]);
+  return <main className="vip-lobby" id="casino-started" inert={blocked}>
     <section className="vip-panel vip-completion">
       <div className="vip-title">
         <Crest className="vip-crown" />
         <h1 ref={title} tabIndex={-1}>ゲーム開始</h1>
-        <p className="vip-room">ROOM <strong>{room}</strong></p>
+        <RoomIdentity room={room} />
       </div>
       <ol className="casino-start-order" aria-label="開始時の座席順">
         {players.map((player, index) => <li key={player.id}>
@@ -133,26 +150,32 @@ function CasinoStarted({ room, players, leave }: { room: string; players: readon
   </main>;
 }
 
-export function CasinoFlow({ connection, audio }: { connection: CasinoConnection; audio: EntranceSound }) {
+export function CasinoFlow({ connection, audio, invitedRoom, onRoomChanged }: {
+  connection: CasinoRoomTransport;
+  audio: CasinoSound;
+  invitedRoom?: string;
+  onRoomChanged?: (roomId: string | null) => void;
+}) {
   useAudioActivation(audio.unlock);
   const info = useSyncExternalStore(connection.subscribe, connection.getSnapshot);
-  const [entrance, setEntrance] = useState<EntrancePhase>('LOADING');
+  const [scene, setScene] = useState<Scene>('LOADING');
   const [progress, setProgress] = useState(casinoAssets.getProgress);
   const [failed, setFailed] = useState<readonly string[]>([]);
+  const [roomProblem, setRoomProblem] = useState<RoomProblem | null>(null);
+  const [roomPending, setRoomPending] = useState<RoomAction | null>(null);
+  const [departing, setDeparting] = useState<ConnectionView | null>(null);
   const [holdDeadline, setHoldDeadline] = useState<number | null>(null);
   const [showCompletion, setShowCompletion] = useState(false);
-  const entranceRef = useRef<EntrancePhase>('LOADING');
+  const sceneRef = useRef<Scene>('LOADING');
   const alive = useRef(false);
   const loaderBusy = useRef(false);
-  const enterButton = useRef<HTMLButtonElement>(null);
   const retryButton = useRef<HTMLButtonElement>(null);
-  const focusedByExit = useRef(false);
   const gameStarted = info.lobby?.phase === 'started';
   const deadline = info.status === 'online' && info.lobby?.phase === 'countdown' ? info.lobby.startAt : null;
 
-  function moveTo(next: EntrancePhase) {
-    entranceRef.current = next;
-    setEntrance(next);
+  function moveTo(next: Scene) {
+    sceneRef.current = next;
+    setScene(next);
   }
 
   useEffect(() => {
@@ -161,18 +184,21 @@ export function CasinoFlow({ connection, audio }: { connection: CasinoConnection
     return () => { alive.current = false; connection.stop(); audio.cut(); };
   }, []);
 
-  useEffect(() => { if (entrance === 'LOAD_ERROR') retryButton.current?.focus(); }, [entrance]);
-  useEffect(() => {
-    if (entrance !== 'READY_TO_ENTER' || !focusedByExit.current) return;
-    focusedByExit.current = false;
-    enterButton.current?.focus();
-  }, [entrance]);
+  useEffect(() => { if (scene === 'LOAD_ERROR') retryButton.current?.focus(); }, [scene]);
 
   useEffect(() => {
-    if (entrance !== 'DOOR_OPENING') return;
-    const timeout = window.setTimeout(finishDoor, reducedMotion() ? 0 : 1210);
-    return () => window.clearTimeout(timeout);
-  }, [entrance]);
+    if (scene === 'ROOM_UNLOCKING') {
+      const timer = window.setTimeout(() => {
+        if (sceneRef.current !== 'ROOM_UNLOCKING') return;
+        audio.playDoor();
+        moveTo('ROOM_OPENING');
+      }, reducedMotion() ? 0 : ROOM_UNLOCK_MS);
+      return () => window.clearTimeout(timer);
+    }
+    if (scene !== 'DOOR_OPENING' && scene !== 'ROOM_OPENING' && scene !== 'ROOM_CLOSING') return;
+    const timer = window.setTimeout(finishDoor, reducedMotion() ? 0 : DOOR_FALLBACK_MS);
+    return () => window.clearTimeout(timer);
+  }, [scene, audio]);
 
   useEffect(() => {
     if (!gameStarted) {
@@ -199,9 +225,10 @@ export function CasinoFlow({ connection, audio }: { connection: CasinoConnection
         return;
       }
       releaseDecodedImages();
-      if (connection.hasSession()) {
-        moveTo('ENTERED');
-        connection.start();
+      const restoration = connection.restore(invitedRoom);
+      if (restoration) {
+        moveTo('RESTORING');
+        void resolveAdmission('join', restoration, true);
       } else moveTo('READY_TO_ENTER');
     }).catch(() => {
       loaderBusy.current = false;
@@ -212,70 +239,104 @@ export function CasinoFlow({ connection, audio }: { connection: CasinoConnection
   }
 
   function enter() {
-    if (entranceRef.current !== 'READY_TO_ENTER') return;
+    if (sceneRef.current !== 'READY_TO_ENTER') return;
     moveTo('DOOR_OPENING');
     audio.playDoor();
-    connection.start();
-    if (reducedMotion()) finishDoor();
+  }
+
+  function openRoom(action: RoomAction, input: string) {
+    if (sceneRef.current !== 'ROOM_SELECT') return;
+    setRoomProblem(null);
+    setRoomPending(action);
+    moveTo('ROOM_CONNECTING');
+    const request = action === 'create' ? connection.create(input) : connection.join(input);
+    void resolveAdmission(action, request, false);
+  }
+
+  async function resolveAdmission(action: RoomAction, request: Promise<Admission>, restoring: boolean) {
+    const result = await request.catch(() => ({ ok: false as const, problem: 'ルームに接続できませんでした。' }));
+    if (!alive.current || sceneRef.current !== (restoring ? 'RESTORING' : 'ROOM_CONNECTING')) return;
+    setRoomPending(null);
+    if (!result.ok) {
+      setRoomProblem({ action, message: result.problem });
+      moveTo('ROOM_SELECT');
+      return;
+    }
+    onRoomChanged?.(result.room.id);
+    if (restoring) {
+      moveTo('ENTERED');
+      return;
+    }
+    audio.cut();
+    audio.playLatch();
+    moveTo('ROOM_UNLOCKING');
   }
 
   function finishDoor() {
-    if (entranceRef.current === 'DOOR_OPENING') moveTo('ENTERED');
-  }
-
-  function doorTransition(event: TransitionEvent<HTMLDivElement>) {
-    if (event.currentTarget === event.target && event.propertyName === 'transform') finishDoor();
+    if (sceneRef.current === 'DOOR_OPENING') moveTo('ROOM_SELECT');
+    else if (sceneRef.current === 'ROOM_OPENING') moveTo('ENTERED');
+    else if (sceneRef.current === 'ROOM_CLOSING') {
+      setDeparting(null);
+      moveTo('ROOM_SELECT');
+    }
   }
 
   function leave() {
+    if (sceneRef.current !== 'ENTERED') return;
+    setDeparting(info);
+    moveTo('ROOM_CLOSING');
     connection.exit();
+    onRoomChanged?.(null);
     audio.cut();
+    audio.playClose();
     setShowCompletion(false);
     setHoldDeadline(null);
-    focusedByExit.current = true;
-    moveTo('READY_TO_ENTER');
   }
 
-  if (entrance === 'ENTERED' && showCompletion) return <div className="casino-flow" data-phase="IN_GAME">
-    <CasinoStarted room={connection.room} players={info.lobby?.startedPlayers ?? []} leave={leave} />
-  </div>;
-
-  const opening = entrance === 'DOOR_OPENING';
-  const entered = entrance === 'ENTERED';
-  const phase: CasinoPhase = entered ? deadline || gameStarted ? 'COUNTDOWN' : 'LOBBY_WAITING' : entrance;
+  const opening = scene === 'DOOR_OPENING';
+  const entered = scene === 'ENTERED';
+  const motion = scene === 'ROOM_UNLOCKING' ? 'unlocking' : scene === 'ROOM_OPENING' ? 'opening' : scene === 'ROOM_CLOSING' ? 'closing' : null;
+  const roomView = motion === 'closing' ? departing : info;
+  const showLobby = Boolean(roomView?.room && (entered || motion));
+  const finished = Boolean(roomView?.lobby?.phase === 'started' && (showCompletion || motion === 'closing'));
+  const phase: CasinoPhase = entered ? showCompletion ? 'IN_GAME' : deadline || gameStarted ? 'COUNTDOWN' : 'LOBBY_WAITING' : scene;
   const percent = Math.floor(progress.loaded * 100 / progress.total);
 
   return <div className="casino-flow" data-phase={phase}>
-    {(opening || entered) && <VipLobby info={info} room={connection.room} setReady={ready => connection.setReady(ready)}
-      leave={leave} opening={opening} deadline={gameStarted ? holdDeadline : deadline} />}
-    {!entered && <main className="casino-entrance" id="casino-entrance" data-opening={opening} inert={opening}>
-      <div className="casino-hinge" aria-hidden="true">
-        <div className="casino-door casino-door--left" />
-        <div className="casino-door casino-door--right" onTransitionEnd={doorTransition} />
-      </div>
-      <div className="casino-entrance-ui">
-        <div className="casino-lockup">
-          <Crest className="casino-crest" />
-          <h1>GAMBLER</h1>
-          <div className="casino-gems" aria-hidden="true">
-            {entranceGems.map(gem => <img src={gem.image} alt="" key={gem.id} draggable={false} />)}
+    {(opening || scene === 'ROOM_SELECT' || scene === 'ROOM_CONNECTING') &&
+      <RoomChooser invitedRoom={invitedRoom} pending={roomPending} problem={roomProblem} blocked={opening} submit={openRoom} />}
+    {showLobby && roomView?.room && (finished
+      ? <CasinoStarted room={roomView.room} players={roomView.lobby?.startedPlayers ?? []} leave={leave} blocked={!entered} />
+      : <VipLobby info={roomView} room={roomView.room} setReady={ready => connection.setReady(ready)}
+          leave={leave} blocked={!entered} deadline={gameStarted ? holdDeadline : deadline} />)}
+    {motion && <RoomDoor motion={motion} onComplete={finishDoor} />}
+    {(opening || scene === 'LOADING' || scene === 'LOAD_ERROR' || scene === 'RESTORING' || scene === 'READY_TO_ENTER') &&
+      <main className="casino-entrance" id="casino-entrance" data-opening={opening} inert={opening}>
+        <CasinoDoors open={opening} onComplete={finishDoor} />
+        <div className="casino-entrance-ui">
+          <div className="casino-lockup">
+            <Crest className="casino-crest" />
+            <h1>GAMBLER</h1>
+            <div className="casino-gems" aria-hidden="true">
+              {entranceGems.map(gem => <img src={gem.image} alt="" key={gem.id} draggable={false} />)}
+            </div>
+          </div>
+          <div className="casino-entrance-controls">
+            {scene === 'READY_TO_ENTER' && <>
+              <button className="casino-action casino-enter" id="enter-casino" onClick={enter}><span>ENTER CASINO</span></button>
+              <p className="entrance-completion" role="status">ロード完了 <span>100%</span></p>
+            </>}
+            {scene === 'RESTORING' && <p className="entrance-completion" role="status">ルームへ再接続しています…</p>}
+            {scene === 'LOADING' && <div className="casino-progress">
+              <div aria-hidden="true"><span>読み込み中</span><span>{progress.loaded} / {progress.total} · {percent}%</span></div>
+              <progress id="casino-progress" aria-label={`素材を読み込み中 ${progress.loaded} / ${progress.total}`} value={progress.loaded} max={progress.total} />
+            </div>}
+            {scene === 'LOAD_ERROR' && <div className="casino-load-error">
+              <p role="alert">{failed.length}件の素材を読み込めませんでした（{percent}%）。</p>
+              <button className="casino-action" ref={retryButton} id="retry-assets" onClick={load}><span>再試行</span></button>
+            </div>}
           </div>
         </div>
-        <div className="casino-entrance-controls">
-          {entrance === 'READY_TO_ENTER' && <>
-            <button ref={enterButton} className="casino-action casino-enter" id="enter-casino" onClick={enter}><span>ENTER CASINO</span></button>
-            <p className="entrance-completion" role="status">ロード完了 <span>100%</span></p>
-          </>}
-          {entrance === 'LOADING' && <div className="casino-progress">
-            <div aria-hidden="true"><span>読み込み中</span><span>{progress.loaded} / {progress.total} · {percent}%</span></div>
-            <progress id="casino-progress" aria-label={`素材を読み込み中 ${progress.loaded} / ${progress.total}`} value={progress.loaded} max={progress.total} />
-          </div>}
-          {entrance === 'LOAD_ERROR' && <div className="casino-load-error">
-            <p role="alert">{failed.length}件の素材を読み込めませんでした（{percent}%）。</p>
-            <button className="casino-action" ref={retryButton} id="retry-assets" onClick={load}><span>再試行</span></button>
-          </div>}
-        </div>
-      </div>
-    </main>}
+      </main>}
   </div>;
 }

@@ -76,6 +76,21 @@ export class EntranceSound {
     });
   }
 
+  playLatch() {
+    this.gate.play(time => {
+      this.tap(time + .012, 322, .12, .095);
+      this.tap(time + .146, 488, .09, .082);
+    });
+  }
+
+  playClose() {
+    this.gate.play(time => {
+      this.tone(time + .07, 57, 84, .075, .55);
+      this.tap(time + .82, 118, .22, .172);
+      this.tap(time + 1, 320, .084, .073);
+    });
+  }
+
   cut() {
     this.gate.cancel();
     for (const [node, graph] of this.voices) {

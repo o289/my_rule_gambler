@@ -53,8 +53,47 @@ button { font-family: inherit; }
   transform-origin: right center;
   background-position-x: calc(min(0px, (100vw - 177.778dvh) / 2) - 50vw);
 }
-.casino-entrance[data-opening="true"] .casino-door--left { transform: rotateY(108deg); }
-.casino-entrance[data-opening="true"] .casino-door--right { transform: rotateY(-108deg); }
+.casino-hinge[data-open="true"] .casino-door--left { transform: rotateY(108deg); }
+.casino-hinge[data-open="true"] .casino-door--right { transform: rotateY(-108deg); }
+
+.casino-room-door {
+  position: fixed;
+  z-index: 4;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  isolation: isolate;
+}
+.room-lock {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 62px;
+  height: 62px;
+  border: 1px solid #edc891;
+  outline: 1px solid #644322;
+  outline-offset: -5px;
+  color: #f6d597;
+  background: radial-gradient(circle at 50% 30%, #66442d, #1e140e 72%);
+  box-shadow: 0 3px 25px #000e, 0 0 16px #ffbc697d;
+  pointer-events: none;
+}
+.room-lock span {
+  position: absolute;
+  top: calc(100% + 8px);
+  padding: 4px 8px;
+  white-space: nowrap;
+  font-size: .75rem;
+  color: #ffe7b8;
+  background: #1b110be8;
+}
+.room-lock-shackle { transform-origin: 22px 14px; }
+.room-lock[data-released="true"] .room-lock-shackle { animation: room-unlock .32s .035s ease-out both; }
+.casino-room-door[data-motion="opening"] .room-lock { opacity: 0; transition: opacity .22s ease-out; }
+.casino-room-door[data-motion="closing"] .room-lock { animation: room-lock-arrival 1.08s both; }
+@keyframes room-unlock { to { transform: translateY(-2px) rotate(24deg); } }
+@keyframes room-lock-arrival { 0%, 80% { opacity: 0; } 100% { opacity: 1; } }
 
 .casino-entrance-ui {
   position: absolute;
@@ -255,6 +294,70 @@ button { font-family: inherit; }
 }
 .vip-panel::before { top: 5px; left: 5px; border-right: 0; border-bottom: 0; }
 .vip-panel::after { bottom: 5px; right: 5px; border-left: 0; border-top: 0; }
+.room-choice-panel {
+  width: min(460px, 100%);
+  padding: clamp(22px, 6vw, 44px);
+  background: linear-gradient(150deg, #271c14f7, #110b08fa 64%);
+}
+.room-choice-heading { text-align: center; margin-bottom: 24px; }
+.room-choice-heading p {
+  margin: 0 0 7px;
+  font: 600 .78rem/1 var(--casino-serif);
+  letter-spacing: .28em;
+  color: var(--casino-gold);
+}
+.room-choice-heading h1 { margin: 0; font: 600 clamp(1.3rem, 5vw, 2rem)/1.2 var(--casino-serif); }
+.room-choice-heading h1:focus { outline: none; }
+.room-choice-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  min-width: 0;
+  margin: 0 0 20px;
+  padding: 4px;
+  border: 1px solid #7c5739;
+  background: #0b0706;
+}
+.room-choice-legend {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.room-choice-mode label { position: relative; }
+.room-choice-mode input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.room-choice-mode span {
+  display: grid;
+  min-height: 44px;
+  place-items: center;
+  padding: 6px;
+  border: 1px solid transparent;
+  color: #d2b494;
+  font-size: .88rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+.room-choice-mode input:checked + span { color: var(--casino-pale); border-color: #a8784d; background: linear-gradient(#63452c, #2b1c13); }
+.room-choice-mode input:focus-visible + span { outline: 2px solid #f6c985; outline-offset: 2px; }
+.room-choice-mode input:disabled + span { cursor: default; }
+.room-choice-form { display: grid; gap: 8px; }
+.room-choice-form label { font-size: .78rem; color: #edcba3; }
+.room-choice-form input {
+  width: 100%;
+  min-height: 46px;
+  padding: 8px 12px;
+  border: 1px solid #8d6645;
+  background: #100b08;
+  color: var(--casino-pale);
+  font: inherit;
+}
+.room-choice-form input:focus-visible { outline: 2px solid #edc084; outline-offset: 2px; }
+.room-choice-form input[aria-invalid="true"] { border-color: #e39c89; }
+.room-choice-form button { width: 100%; min-height: 44px; margin-top: 8px; }
+.room-choice-error { margin: 13px 0 0; color: #ffc1b0; font-size: .82rem; line-height: 1.5; }
 .vip-heading {
   display: grid;
   grid-template-columns: minmax(max-content, 1fr) minmax(0, 3fr) minmax(max-content, 1fr);
@@ -283,6 +386,8 @@ button { font-family: inherit; }
   overflow-wrap: anywhere;
 }
 .vip-room strong { color: #f2c48b; margin-inline-start: 3px; }
+.vip-room span { display: block; margin-top: 4px; }
+.vip-room code { color: #f3d9ac; font-size: .82rem; user-select: all; }
 
 .vip-table-layout {
   display: grid;
@@ -514,6 +619,7 @@ button { font-family: inherit; }
 
 @media (prefers-reduced-motion: reduce) {
   .casino-flow *, .casino-flow *::before, .casino-flow *::after { scroll-behavior: auto; }
-  .casino-door, .casino-entrance-ui, .vip-seat-marker { transition: none; }
-  .vip-seat-chip, .countdown-chip, .countdown-disc[data-exiting="true"] { animation: none; }
+  .casino-door, .casino-entrance-ui, .vip-seat-marker, .casino-room-door[data-motion="opening"] .room-lock { transition: none; }
+  .vip-seat-chip, .countdown-chip, .countdown-disc[data-exiting="true"],
+  .room-lock[data-released="true"] .room-lock-shackle, .casino-room-door[data-motion="closing"] .room-lock { animation: none; }
 }
