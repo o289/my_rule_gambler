@@ -23,6 +23,7 @@ export class CasinoRoom {
   private countdown: ReturnType<typeof setTimeout> | null = null;
   private startAt: number | null = null;
   private started = false;
+  private startedPlayers: Seat[] | null = null;
 
   constructor(private readonly countdownMs = COUNTDOWN_MS) {}
 
@@ -48,6 +49,12 @@ export class CasinoRoom {
       if (this.countdown !== countdown) return;
       this.cancelCountdown();
       this.started = this.eligible();
+      if (this.started) {
+        this.startedPlayers = this.members
+          .filter(member => member.peer !== null)
+          .sort((a, b) => a.slot - b.slot)
+          .map(member => ({ id: member.id, name: member.name, slot: member.slot, ready: member.ready, online: true }));
+      }
       this.update();
     }, this.countdownMs);
     this.countdown = countdown;
@@ -56,6 +63,7 @@ export class CasinoRoom {
   private state(): LobbyState {
     return {
       seats: this.members.map(({ id, name, slot, ready, peer }) => ({ id, name, slot, ready, online: peer !== null })),
+      startedPlayers: this.startedPlayers?.map(seat => ({ ...seat })) ?? null,
       phase: this.started ? 'started' : this.countdown ? 'countdown' : 'waiting',
       hostId: this.members.find(member => member.peer)?.id ?? null,
       startAt: this.startAt,

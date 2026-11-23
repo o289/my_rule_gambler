@@ -117,5 +117,6 @@ test('the independent casino server starts two clients from the same deadline an
     const finished = await returned.join(second.token);
     assert.equal(finished.playerId, second.playerId);
     assert.equal(finished.state.phase, 'started');
+    assert.deepEqual(finished.state.startedPlayers?.map(seat => seat.id), startedHost.state.startedPlayers?.map(seat => seat.id));
   } finally { server.close(); }
 });

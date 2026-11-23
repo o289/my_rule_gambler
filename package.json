@@ -9,7 +9,9 @@
     "dev": "node src/dev/run-dev.mjs",
     "dev:web": "vp dev --host 127.0.0.1 --port 5178 --strictPort",
     "dev:dice-server": "node --import tsx src/platform/local-demo-servers/dice/server/start.ts",
-    "dev:casino-server": "node --import tsx src/platform/local-demo-servers/casino-entry/server/start.ts"
+    "dev:casino-server": "node --import tsx src/platform/local-demo-servers/casino-entry/server/start.ts",
+    "build": "vp build",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.21.0",

@@ -23,18 +23,15 @@ const options: readonly { id: PreviewId; label: string; description: string }[] 
   { id: 'bank', label: 'バンク', description: 'コインと金庫の取引演出' },
 ];
 
-function selectedFromLocation(): PreviewId | null {
-  const value = new URLSearchParams(location.search).get('preview');
-  return value && Object.hasOwn(previews, value) ? value as PreviewId : null;
-}
-
 function App() {
-  const selected = selectedFromLocation();
+  const value = new URLSearchParams(location.search).get('preview');
+  const selected = value && Object.hasOwn(previews, value) ? value as PreviewId : null;
+  const showList = value === 'list';
   if (selected) {
     const Preview = previews[selected];
     const label = options.find(option => option.id === selected)?.label ?? 'プレビュー';
     return <>
-      <a className="preview-back" href="/" aria-label="デモ一覧に戻る">
+      <a className="preview-back" href="/?preview=list" aria-label="デモ一覧に戻る">
         <span aria-hidden="true">←</span> デモ一覧
       </a>
       <Suspense fallback={<div className="preview-loading" role="status">デモを読み込んでいます…</div>}>
@@ -42,6 +39,13 @@ function App() {
       </Suspense>
       <span className="preview-current" aria-live="polite">{label}</span>
     </>;
+  }
+
+  if (!showList) {
+    const Casino = previews.casino;
+    return <Suspense fallback={<div className="preview-loading" role="status">カジノを読み込んでいます…</div>}>
+      <Casino key={new URLSearchParams(location.search).get('room') ?? 'salon'} />
+    </Suspense>;
   }
 
   return <main className="preview-home">
@@ -60,7 +64,7 @@ function App() {
         <span className="preview-card-arrow" aria-hidden="true">↗</span>
       </a>)}
     </nav>
-    <footer className="preview-footer">ローカルプレビュー · 6要素</footer>
+    <footer className="preview-footer">開発用デモ一覧 · 6要素</footer>
   </main>;
 }
 

@@ -5,6 +5,8 @@ export const COUNTDOWN_MS = 3000;
 export interface Seat { id: string; name: string; online: boolean; slot: number; ready: boolean }
 export interface LobbyState {
   seats: readonly Seat[];
+  /** Participants in their frozen seat order at the instant the room starts. */
+  startedPlayers: readonly Seat[] | null;
   phase: 'waiting' | 'countdown' | 'started';
   hostId: string | null;
   startAt: number | null;
@@ -62,9 +64,12 @@ function seat(value: unknown): value is Seat {
 
 function lobbyState(value: unknown): value is LobbyState {
   return record(value) && Array.isArray(value.seats) && value.seats.length <= MAX_PLAYERS && value.seats.every(seat)
+    && (value.startedPlayers === null || Array.isArray(value.startedPlayers) && value.startedPlayers.length >= MIN_PLAYERS
+      && value.startedPlayers.length <= MAX_PLAYERS && value.startedPlayers.every(seat))
     && (value.hostId === null || id(value.hostId)) && int(value.serverTime)
-    && (value.phase === 'countdown' ? int(value.startAt)
-      : (value.phase === 'waiting' || value.phase === 'started') && value.startAt === null);
+    && (value.phase === 'countdown' ? int(value.startAt) && value.startedPlayers === null
+      : value.phase === 'waiting' ? value.startAt === null && value.startedPlayers === null
+        : value.phase === 'started' && value.startAt === null && value.startedPlayers !== null);
 }
 
 export function readServerMessage(value: unknown): ServerMessage | null {

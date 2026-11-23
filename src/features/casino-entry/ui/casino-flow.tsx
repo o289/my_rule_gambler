@@ -113,7 +113,7 @@ function VipLobby({ info, room, setReady, leave, opening, deadline }: {
   </main>;
 }
 
-function CasinoStarted({ room, leave }: { room: string; leave: () => void }) {
+function CasinoStarted({ room, players, leave }: { room: string; players: readonly Seat[]; leave: () => void }) {
   const title = useRef<HTMLHeadingElement>(null);
   useEffect(() => { title.current?.focus({ preventScroll: true }); }, []);
   return <main className="vip-lobby" id="casino-started">
@@ -123,6 +123,11 @@ function CasinoStarted({ room, leave }: { room: string; leave: () => void }) {
         <h1 ref={title} tabIndex={-1}>ゲーム開始</h1>
         <p className="vip-room">ROOM <strong>{room}</strong></p>
       </div>
+      <ol className="casino-start-order" aria-label="開始時の座席順">
+        {players.map((player, index) => <li key={player.id}>
+          <span>{String(index + 1).padStart(2, '0')}</span>{player.name}
+        </li>)}
+      </ol>
       <button className="casino-plain" type="button" onClick={leave}>退出</button>
     </section>
   </main>;
@@ -232,7 +237,7 @@ export function CasinoFlow({ connection, audio }: { connection: CasinoConnection
   }
 
   if (entrance === 'ENTERED' && showCompletion) return <div className="casino-flow" data-phase="IN_GAME">
-    <CasinoStarted room={connection.room} leave={leave} />
+    <CasinoStarted room={connection.room} players={info.lobby?.startedPlayers ?? []} leave={leave} />
   </div>;
 
   const opening = entrance === 'DOOR_OPENING';

@@ -233,6 +233,17 @@ button { font-family: inherit; }
   gap: 22px;
   padding-block: 33px;
 }
+.casino-start-order {
+  display: grid;
+  gap: 8px;
+  width: min(260px, 100%);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--casino-pale);
+}
+.casino-start-order li { display: flex; align-items: center; gap: 12px; padding: 8px 12px; border: 1px solid #d6b47a55; }
+.casino-start-order li span { color: #d6b47a; font-variant-numeric: tabular-nums; }
 
 .vip-panel::before, .vip-panel::after {
   content: '';

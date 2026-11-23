@@ -69,10 +69,18 @@ test('only all-ready groups of two to six start, with a shared deadline and uniq
       for (const guest of guests) {
         assert.equal(guest.state.phase, 'started');
         assert.equal(guest.state.startAt, null);
+        assert.deepEqual(guest.state.startedPlayers?.map(seat => seat.id), guests.map(item => item.welcome.playerId));
         assert.equal(guest.seen.filter(message => message.type === 'state' && message.state.phase === 'started').length, 1);
       }
       ready(room, last, false);
       assert.equal(last.state.phase, 'started');
+      const fixedStartOrder = last.state.startedPlayers;
+      if (count < MAX_PLAYERS) {
+        const lateJoiner = join(room);
+        assert.deepEqual(lateJoiner.state.startedPlayers, fixedStartOrder);
+      }
+      room.exit(guests[0]!.welcome.playerId, guests[0]!);
+      assert.deepEqual(last.state.startedPlayers, fixedStartOrder, 'later exits do not change the frozen start order');
     } finally { room.dispose(); }
   }
 });
@@ -121,6 +129,7 @@ test('starting is blocked alone and cancelled by participation changes, with sta
     const newcomer = join(room);
     assert.equal(newcomer.state.phase, 'started');
     assert.equal(newcomer.state.seats[2]?.slot, 2);
+    assert.deepEqual(newcomer.state.startedPlayers, a.state.startedPlayers);
     room.exit(a.welcome.playerId, a);
     assert.equal(replacement.state.hostId, replacement.welcome.playerId);
   } finally { room.dispose(); }
