@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
-import { CasinoRoom } from '../../platform/local-demo-servers/casino-entry/server/room';
-import type { RoomPeer } from '../../platform/local-demo-servers/casino-entry/server/room';
+import { Room } from '../../platform/server/core/room';
+import type { LobbyPeer } from '../../platform/server/core/room';
+import type { RoomRuntime } from '../../platform/server/core/ports';
 import { MAX_PLAYERS, MIN_PLAYERS, readClientMessage, readServerMessage } from '../../shared/contracts/casino-entry';
 import type { ServerMessage } from '../../shared/contracts/casino-entry';
 
-class Guest implements RoomPeer {
+class Guest implements LobbyPeer {
+  readonly protocol = 'lobby' as const;
   readonly seen: ServerMessage[] = [];
   close() {}
   send(message: ServerMessage) {
@@ -29,21 +31,28 @@ class Guest implements RoomPeer {
 }
 
 const countdownMs = 45;
+let nextId = 0;
+const runtime: RoomRuntime = {
+  now: () => Date.now(), createPlayerId: () => `player-${++nextId}`, createToken: () => String(++nextId).padStart(32, 't'),
+  createBoardSeed: () => 1, schedule: (callback, delay) => setTimeout(callback, delay),
+  cancelTimer: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  createRoll: () => { throw new Error('Dice roll is not used in lobby tests'); }, allowPreviewDev: false,
+};
 const roomInfo = { id: 'test', name: 'テスト卓' };
 
-function join(room: CasinoRoom, token?: string) {
+function join(room: Room, token?: string) {
   const guest = new Guest();
-  room.join(guest, token);
+  room.connectLobby(guest, token);
   return guest;
 }
 
-function ready(room: CasinoRoom, guest: Guest, value = true) {
-  room.command(guest.welcome.playerId, guest, { type: 'ready', ready: value });
+function ready(room: Room, guest: Guest, value = true) {
+  room.commandLobby(guest.welcome.playerId, guest, { type: 'ready', ready: value });
 }
 
 test('only all-ready groups of two to six start, with a shared deadline and unique stable slots', async () => {
   for (let count = MIN_PLAYERS; count <= MAX_PLAYERS; count += 1) {
-    const room = new CasinoRoom(roomInfo, countdownMs);
+    const room = new Room(roomInfo, runtime, { mode: 'standard', countdownMs });
     try {
       const guests = Array.from({ length: count }, () => join(room));
       const host = guests[0];
@@ -78,14 +87,14 @@ test('only all-ready groups of two to six start, with a shared deadline and uniq
       const fixedStartOrder = last.state.startedPlayers;
       const lateJoiner = join(room);
       assert.ok(lateJoiner.seen.some(message => message.type === 'error' && message.code === 'STARTED'));
-      room.exit(guests[0]!.welcome.playerId, guests[0]!);
+      room.exitLobby(guests[0]!.welcome.playerId, guests[0]!);
       assert.deepEqual(last.state.startedPlayers, fixedStartOrder, 'later exits do not change the frozen start order');
     } finally { room.dispose(); }
   }
 });
 
 test('starting is blocked alone and cancelled by participation changes, with stable reconnect identity', async () => {
-  const room = new CasinoRoom(roomInfo, countdownMs);
+  const room = new Room(roomInfo, runtime, { mode: 'standard', countdownMs });
   try {
     const a = join(room);
     ready(room, a);
@@ -100,7 +109,7 @@ test('starting is blocked alone and cancelled by participation changes, with sta
     assert.equal(a.state.phase, 'waiting');
     ready(room, c);
     assert.equal(a.state.phase, 'countdown');
-    room.exit(c.welcome.playerId, c);
+    room.exitLobby(c.welcome.playerId, c);
     assert.equal(a.state.phase, 'waiting');
     assert.equal(a.state.seats.length, 2);
     ready(room, a);
@@ -110,7 +119,7 @@ test('starting is blocked alone and cancelled by participation changes, with sta
     ready(room, a);
     assert.equal(a.state.phase, 'countdown');
 
-    room.leave(b.welcome.playerId, b);
+    room.disconnect(b.welcome.playerId, b);
     assert.equal(a.state.phase, 'waiting');
     assert.equal(a.state.seats[1]?.online, false);
     await delay(countdownMs + 15);
@@ -121,20 +130,20 @@ test('starting is blocked alone and cancelled by participation changes, with sta
     assert.equal(restored.state.phase, 'countdown');
     const replacement = join(room, b.welcome.token);
     assert.equal(replacement.state.startAt, restored.state.startAt);
-    room.leave(restored.welcome.playerId, restored);
+    room.disconnect(restored.welcome.playerId, restored);
     assert.equal(a.state.phase, 'countdown', 'obsolete socket close cannot cancel');
     await delay(countdownMs + 15);
     assert.equal(a.state.phase, 'started');
     const startedReturn = join(room, b.welcome.token);
     assert.equal(startedReturn.state.phase, 'started');
     assert.deepEqual(startedReturn.state.startedPlayers, a.state.startedPlayers);
-    room.exit(a.welcome.playerId, a);
+    room.exitLobby(a.welcome.playerId, a);
     assert.equal(startedReturn.state.hostId, startedReturn.welcome.playerId);
   } finally { room.dispose(); }
 });
 
 test('an unready departure while waiting automatically starts an eligible group', async () => {
-  const room = new CasinoRoom(roomInfo, countdownMs);
+  const room = new Room(roomInfo, runtime, { mode: 'standard', countdownMs });
   try {
     const first = join(room);
     const second = join(room);
@@ -142,7 +151,7 @@ test('an unready departure while waiting automatically starts an eligible group'
     ready(room, first);
     ready(room, second);
     assert.equal(first.state.phase, 'waiting');
-    room.exit(waiting.welcome.playerId, waiting);
+    room.exitLobby(waiting.welcome.playerId, waiting);
     assert.equal(first.state.phase, 'countdown');
     await delay(countdownMs + 15);
     assert.equal(second.state.phase, 'started');

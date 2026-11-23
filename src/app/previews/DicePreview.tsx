@@ -6,9 +6,16 @@ import DiceScreen from '../../features/dice/ui/main';
 import type { DiceResult } from '../../shared/contracts/dice';
 import { SAMPLE_BOARD } from '../../dev/preview-data/sample-board';
 import { DiceConnection } from '../../features/dice/ui/connection';
+import { casinoTokenStorageKey } from '../../features/casino-entry/ui/connection';
 
 const params = new URLSearchParams(location.search);
-const connection = new DiceConnection(params.get('dev') === '1', params.get('room') ?? 'salon');
+const gameRoom = params.get('game') === 'dice';
+const room = (params.get('room') ?? 'salon').toLowerCase();
+const casinoToken = gameRoom ? (() => {
+  try { return sessionStorage.getItem(casinoTokenStorageKey(room)) ?? undefined; }
+  catch { return undefined; }
+})() : undefined;
+const connection = new DiceConnection(!gameRoom && params.get('dev') === '1', room, casinoToken);
 const legacyDefinition = { ...SAMPLE_BOARD, rows: SAMPLE_BOARD.rows.map(row => ({ id: row.id, score: row.score })) };
 
 function createBoardState(definition: BoardDefinition, game: DiceBoardContext['game'], active: DiceResult | undefined): BoardState {

@@ -5,14 +5,15 @@ import { Hono } from 'hono';
 import { readClientMessage } from '../../../../shared/contracts/casino-entry';
 import type { ClientMessage, ServerMessage } from '../../../../shared/contracts/casino-entry';
 import { startWebSocketTransport } from '../../../server/websocket';
-import { CasinoRoom } from './room';
+import { RoomRegistry } from '../../../server/core/room-registry';
+import type { RoomPeer } from '../../../server/core/room';
+import { createNodeRoomRuntime } from '../../dice/server/room-runtime';
 
-const MAX_ROOMS = 24;
-
-export interface HttpOptions { port: number }
+export interface HttpOptions { port: number; registry?: RoomRegistry; countdownMs?: number }
 
 export async function startCasinoServer(options: HttpOptions) {
-  const rooms = new Map<string, CasinoRoom>();
+  const ownsRegistry = !options.registry;
+  const registry = options.registry ?? new RoomRegistry(createNodeRoomRuntime({ allowPreviewDev: false }), options.countdownMs);
   const app = new Hono();
   app.get('/health', context => context.json({ ready: true }));
 
@@ -25,31 +26,28 @@ export async function startCasinoServer(options: HttpOptions) {
       decodeMessage: readClientMessage,
       inputError: { type: 'error', code: 'INPUT', message: '操作の形式を確認してください。' },
       onMaintenance() {
-        for (const [name, room] of rooms) if (room.prune(Date.now())) {
-          room.dispose();
-          rooms.delete(name);
-        }
+        registry.prune(Date.now());
       },
       createSession(peer, controls) {
-        let room: CasinoRoom | null = null;
+        let room: import('../../../server/core/room').Room | null = null;
         let id: string | null = null;
+        const roomPeer: RoomPeer = { protocol: 'lobby', send: message => peer.send(message), close: (code, reason) => peer.close(code, reason) };
         return {
           onMessage(message) {
             if (!room && (message.type === 'create' || message.type === 'join')) {
               controls.joined();
               if (message.type === 'create') {
-                if (rooms.size >= MAX_ROOMS) {
+                if (!registry.canCreate('standard')) {
                   peer.send({ type: 'error', code: 'BUSY', message: '現在、新しいルームを作成できません。' });
                   peer.close(1013, 'room limit');
                   return;
                 }
                 let roomId = randomBytes(4).toString('hex');
-                while (rooms.has(roomId)) roomId = randomBytes(4).toString('hex');
-                room = new CasinoRoom({ id: roomId, name: message.name });
-                rooms.set(roomId, room);
-                id = room.join(peer);
+                while (registry.get(roomId)) roomId = randomBytes(4).toString('hex');
+                room = registry.create({ id: roomId, name: message.name });
+                id = room?.connectLobby(roomPeer) ?? null;
               } else {
-                const existing = rooms.get(message.room);
+                const existing = registry.get(message.room);
                 if (!existing) {
                   const error = message.token
                     ? { code: 'TOKEN', message: '前回のセッションは終了しています。' }
@@ -59,23 +57,20 @@ export async function startCasinoServer(options: HttpOptions) {
                   return;
                 }
                 room = existing;
-                id = room.join(peer, message.token);
+                id = room.connectLobby(roomPeer, message.token);
               }
               if (!id) peer.close(4003, 'join rejected');
             } else if (room && id && message.type === 'leave') {
-              room.exit(id, peer);
-              if (room.empty) {
-                rooms.delete(room.info.id);
-                room.dispose();
-              }
+              room.exitLobby(id, roomPeer);
+              registry.deleteIfEmpty(room.info.id);
               id = null;
               peer.close(1000, 'left room');
             } else if (room && id && (message.type === 'ready' || message.type === 'clock')) {
-              room.command(id, peer, message);
+              room.commandLobby(id, roomPeer, message);
             }
           },
           onClose() {
-            if (room && id) room.leave(id, peer);
+            if (room && id) room.disconnect(id, roomPeer);
           },
         };
       },
@@ -86,8 +81,7 @@ export async function startCasinoServer(options: HttpOptions) {
   function close() {
     if (closed) return;
     closed = true;
-    for (const room of rooms.values()) room.dispose();
-    rooms.clear();
+    if (ownsRegistry) registry.dispose();
     transport.close();
     server.close();
   }

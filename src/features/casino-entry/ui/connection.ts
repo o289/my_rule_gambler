@@ -30,7 +30,7 @@ const HOLD: ConnectionView = {
 const SESSION_ROOM = 'atelier-noir-casino-entry-last-room';
 const NO_CONNECTION = 'ルームに接続できませんでした。もう一度お試しください。';
 const ADMISSION_TIMEOUT_MS = 6000;
-const tokenKey = (room: string) => `atelier-noir-casino-entry:${room}`;
+export const casinoTokenStorageKey = (room: string) => `atelier-noir-casino-entry:${room}`;
 
 type Join = Extract<ClientMessage, { type: 'join' }>;
 type Access = Extract<ClientMessage, { type: 'create' | 'join' }>;
@@ -78,7 +78,7 @@ export class CasinoConnection implements CasinoRoomTransport {
       const input = hint ?? sessionStorage.getItem(SESSION_ROOM);
       const room = input && parseRoomId(input);
       if (!room) return undefined;
-      const token = sessionStorage.getItem(tokenKey(room));
+      const token = sessionStorage.getItem(casinoTokenStorageKey(room));
       return token ? this.admit({ type: 'join', room, token }) : undefined;
     } catch {
       return undefined;
@@ -112,7 +112,7 @@ export class CasinoConnection implements CasinoRoomTransport {
 
   private remember(session: Session) {
     try {
-      sessionStorage.setItem(tokenKey(session.roomId), session.token);
+      sessionStorage.setItem(casinoTokenStorageKey(session.roomId), session.token);
       sessionStorage.setItem(SESSION_ROOM, session.roomId);
     } catch {
       // The live connection still retains the token when storage is unavailable.
@@ -121,7 +121,7 @@ export class CasinoConnection implements CasinoRoomTransport {
 
   private forget(roomId: string) {
     try {
-      sessionStorage.removeItem(tokenKey(roomId));
+      sessionStorage.removeItem(casinoTokenStorageKey(roomId));
       if (sessionStorage.getItem(SESSION_ROOM) === roomId) sessionStorage.removeItem(SESSION_ROOM);
     } catch {
       // Removing the live session still prevents another reconnect.

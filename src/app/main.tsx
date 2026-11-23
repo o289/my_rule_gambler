@@ -24,9 +24,22 @@ const options: readonly { id: PreviewId; label: string; description: string }[] 
 ];
 
 function App() {
-  const value = new URLSearchParams(location.search).get('preview');
+  const params = new URLSearchParams(location.search);
+  const game = params.get('game');
+  const gameRoom = game === 'dice' && /^[a-f0-9]{8}$/i.test(params.get('room') ?? '');
+  const value = params.get('preview');
   const selected = value && Object.hasOwn(previews, value) ? value as PreviewId : null;
   const showList = value === 'list';
+  if (gameRoom) {
+    const Dice = previews.dice;
+    const room = params.get('room')!.toLowerCase();
+    return <>
+      <a className="preview-back" href={`/?room=${encodeURIComponent(room)}`} aria-label="待機室へ戻る">
+        <span aria-hidden="true">←</span> 待機室
+      </a>
+      <Suspense fallback={<div className="preview-loading" role="status">対戦を読み込んでいます…</div>}><Dice /></Suspense>
+    </>;
+  }
   if (selected) {
     const Preview = previews[selected];
     const label = options.find(option => option.id === selected)?.label ?? 'プレビュー';

@@ -24,7 +24,7 @@ npm ci
 npm run dev
 ```
 
-通常入口は [http://127.0.0.1:5178/](http://127.0.0.1:5178/) です。カジノ入場後にルームを作成するか、ルームIDで参加します。VIPラウンジで全員がREADYを選ぶと、共通カウントダウンを経て「ゲーム開始」と確定席順を表示します。開発用デモ一覧は [http://127.0.0.1:5178/?preview=list](http://127.0.0.1:5178/?preview=list) です。ダイスとカジノ入場はローカル WebSocket サーバーで複数タブ間を同期します。
+通常入口は [http://127.0.0.1:5178/](http://127.0.0.1:5178/) です。カジノ入場後にルームを作成するか、ルームIDで参加します。VIPラウンジで全員がREADYを選ぶと、共通カウントダウン後に確定席順が表示され、「対戦へ進む」から同じルームのダイス画面へ移動します。開発用デモ一覧は [http://127.0.0.1:5178/?preview=list](http://127.0.0.1:5178/?preview=list) です。通常のルームIDは8桁の16進数です。ダイス単独プレビューは別の内部IDを使うため通常ルームと混ざりません。
 
 | デモ | URL |
 | --- | --- |
@@ -45,7 +45,7 @@ npm run dev
 
 宝石ダイスは [`src/features/dice/ui/3d/`](./src/features/dice/ui/3d/) の Three.js 表示に一本化しています。ダイス、ボード、エフェクト、カジノエントリーで宝石画像とフレームを共有します。独立した2D表示・モーション・デモはなく、エフェクトの停止演出も同じ3Dダイス形状、面テクスチャ、停止タイミングを使います。
 
-プレビューを2つ以上のタブで開くと、同じルームのプレイヤーとして参加できます。別の卓を開く場合は `?preview=dice&room=table-a` のようにルーム名を指定します。最初に入ったプレイヤーが手番です。手番プレイヤーの **ROLL DICE** で各画面にトレイが開き、全ダイスが止まるまで **CONFIRM** は押せません。各参加者は自分の画面のトレイを閉じられ、手番プレイヤーの **CONFIRM** で共有盤面が配置段階に進みます。
+プレビューを2つ以上のタブで開くと、同じルーム名のプレイヤーとして参加できます。別の卓を開く場合は `?preview=dice&room=table-a` のようにルーム名を指定します。通常ルームID用の8桁16進数は予約されているため、プレビューでは `table-a` など別の名前を使ってください。最初に入ったプレイヤーが手番です。手番プレイヤーの **ROLL DICE** で各画面にトレイが開き、全ダイスが止まるまで **CONFIRM** は押せません。各参加者は自分の画面のトレイを閉じられ、手番プレイヤーの **CONFIRM** で共有盤面が配置段階に進みます。
 
 確定した出目を選び、各行の左端の空きマスに同じ宝石を配置できます。通常は1個以上配置すると残ったダイスを REROLL できます。置けない場合や配置を終えた場合は END TURN で手番を渡します。配置済みのダイスは振り直しの対象から外れます。ゴールと指定宝石の並びはルーム作成時にサーバーが決め、再接続しても同じ配置に戻ります。この共有盤面では、得点チップの精算・勝敗判定・全ボード進行は行いません。
 
@@ -56,7 +56,8 @@ npm run dev
 | `src/features/dice/model/geometry.ts` と `src/shared/contracts/dice.ts` | トレイ寸法、宝石の面、通信データの型と検証 |
 | `src/features/dice/server/physics.ts` | Rapier の剛体・衝突・停止判定 |
 | `src/platform/server/core/dice-game.ts`、`dice/roll-engine.ts` | ランタイム非依存の手番・配置ルールと固定ステップ進行 |
-| `src/platform/local-demo-servers/dice/server/room.ts`、`roll-runner.ts` | NodeデモのRoom接続、4ms実行、物理ロールとフレーム配信 |
+| `src/platform/server/core/room.ts`、`room-registry.ts`、`dice-game.ts`、`lobby.ts` | 1ルームの参加者・待機室・対戦状態をまとめて保持し、共通レジストリで両入口から共有 |
+| `src/platform/local-demo-servers/dice/server/room-runtime.ts`、`roll-runner.ts` | Node依存のID・時計・物理ロール組み立て、4ms実行、フレーム配信 |
 | `src/platform/local-demo-servers/dice/server/http.ts`、`src/platform/server/websocket.ts` | Hono の HTTP health、Room 接続とNode共通 WebSocket 制御 |
 | `src/features/dice/ui/3d/tray-scene.tsx` | 固定俯瞰のThree.jsトレイ、カップ、ダイス描画、受信間の補間 |
 | `src/features/dice/ui/connection.ts` | 既存 WebSocket デモの接続、再接続、クライアント状態 |
@@ -139,12 +140,12 @@ playBankTransaction({ type: 'withdraw', playerId: 'player-1', amount: 70, tender
 
 ## カジノ入場・VIPラウンジのデモ
 
-通常入口と `?preview=casino` は同じ入場画面を使います。複数人の動作を確認するには `npm run dev` で起動し、次の手順で同じルームに入ります。
+通常入口と `?preview=casino` は同じ入場画面を使います。`npm run dev` は待機室とダイスの通信入口を一つのNodeプロセスで起動し、両方が同じルーム管理表を使います。複数人の動作を確認するには、次の手順で同じルームに入ります。
 
 1. **ENTER CASINO** で入口の扉を開け、**ルーム作成** で名前を入力して **作成して入室** を選びます。
 2. 待機室に表示された8文字のルームIDを共有します。別タブでは **ルーム参加** を選び、IDを入力して **IDで参加** を押します。入室後のURLも共有できます。招待リンクから開くと **ルーム参加** が選ばれ、IDが入力欄に入ります。
 3. サーバーが入室を認めると、部屋の扉が解錠して開きます。IDの入力違い、満室、開始済みの場合は入力画面にエラーを表示します。待機室の **退出** では扉を閉じ、ルーム選択へ戻ります。
-4. 2〜6人全員が **READY** を選ぶと、卓の中央に3・2・1が表示されます。カジノ入場デモは、確定した座席順を添えた「ゲーム開始」画面までを扱います。
+4. 2〜6人全員が **READY** を選ぶと、卓の中央に3・2・1が表示されます。開始時に固定された席順が表示されたら、参加者は **対戦へ進む** を選びます。招待された席順に含まれない人にはこのボタンは表示されません。
 
 | 場所 | 役割 |
 | --- | --- |
@@ -152,7 +153,8 @@ playBankTransaction({ type: 'withdraw', playerId: 'player-1', amount: 70, tender
 | `src/features/casino-entry/ui/casino-assets.ts`、`asset-loader.ts` | 初回の画像読み込み・デコード、進捗、失敗分の再試行 |
 | `src/features/casino-entry/ui/connection.ts`、`src/shared/contracts/casino-entry.ts` | ルーム作成・IDによる入室確認、同期、復帰、退出、開始席順の受け渡し |
 | `src/platform/server/core/lobby.ts`、`participant-lifecycle.ts` | ランタイム非依存のREADY・カウント期限・開始席順・再接続期限判定 |
-| `src/platform/local-demo-servers/casino-entry/server/room.ts`、`http.ts`、`src/platform/server/websocket.ts` | Nodeデモの入室、接続管理、メッセージ配信とロビーRoom |
+| `src/platform/server/core/room.ts`、`room-registry.ts`、`src/platform/local-demo-servers/start.ts` | 一つのRoom実体と管理表を共有し、待機室から対戦へ同じ参加者・秘密トークンを引き継ぐ |
+| `src/platform/local-demo-servers/casino-entry/server/http.ts`、`dice/server/http.ts`、`src/platform/server/websocket.ts` | Node通信入口、プロトコル変換、共通WebSocket制御 |
 | `sound.ts` | クリック操作後に再生できる扉の金属音 |
 
 画面は読み込み完了後もボタンを押すまで閉じたままです。CSS 3Dの遠近法と左右の蝶番で入口と部屋の扉を奥へ回転させます。卓を操作できるのは部屋の扉が開き切ってからです。端末の視覚効果を減らす設定に従い、回転などを省略します。
@@ -181,7 +183,7 @@ playBankTransaction({ type: 'withdraw', playerId: 'player-1', amount: 70, tender
 - `src/shared/contracts/` — ダイスとカジノ入場の既存メッセージ形式
 - `src/platform/server/core/` — ランタイム非依存のロビー、ダイス規則、参加者期限、固定ステップ処理
 - `src/platform/server/websocket.ts` — Node サーバー共通の WebSocket 接続制御
-- `src/platform/local-demo-servers/` — ローカルデモ固有のサーバーと Room 管理
+- `src/platform/local-demo-servers/` — Node起動元とカジノ・ダイスの通信入口、物理ロール実行
 - `src/dev/preview-data/` — デモ盤面などのサンプルデータ
 - `src/dev/tests/` — 要素別・サーバー通信とcoreの回帰テスト
 

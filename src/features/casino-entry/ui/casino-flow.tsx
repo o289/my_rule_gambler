@@ -130,7 +130,7 @@ function RoomIdentity({ room }: { room: CasinoRoomInfo }) {
   </div>;
 }
 
-function CasinoStarted({ room, players, leave, blocked }: { room: CasinoRoomInfo; players: readonly Seat[]; leave: () => void; blocked: boolean }) {
+function CasinoStarted({ room, players, playerId, leave, blocked }: { room: CasinoRoomInfo; players: readonly Seat[]; playerId: string | null; leave: () => void; blocked: boolean }) {
   const title = useRef<HTMLHeadingElement>(null);
   useEffect(() => { if (!blocked) title.current?.focus({ preventScroll: true }); }, [blocked]);
   return <main className="vip-lobby" id="casino-started" inert={blocked}>
@@ -145,6 +145,8 @@ function CasinoStarted({ room, players, leave, blocked }: { room: CasinoRoomInfo
           <span>{String(index + 1).padStart(2, '0')}</span>{player.name}
         </li>)}
       </ol>
+      {playerId && players.some(player => player.id === playerId) &&
+        <a className="casino-plain" href={`/?game=dice&room=${encodeURIComponent(room.id)}`}>対戦へ進む</a>}
       <button className="casino-plain" type="button" onClick={leave}>退出</button>
     </section>
   </main>;
@@ -306,7 +308,7 @@ export function CasinoFlow({ connection, audio, invitedRoom, onRoomChanged }: {
     {(opening || scene === 'ROOM_SELECT' || scene === 'ROOM_CONNECTING') &&
       <RoomChooser invitedRoom={invitedRoom} pending={roomPending} problem={roomProblem} blocked={opening} submit={openRoom} />}
     {showLobby && roomView?.room && (finished
-      ? <CasinoStarted room={roomView.room} players={roomView.lobby?.startedPlayers ?? []} leave={leave} blocked={!entered} />
+      ? <CasinoStarted room={roomView.room} players={roomView.lobby?.startedPlayers ?? []} playerId={info.playerId} leave={leave} blocked={!entered} />
       : <VipLobby info={roomView} room={roomView.room} setReady={ready => connection.setReady(ready)}
           leave={leave} blocked={!entered} deadline={gameStarted ? holdDeadline : deadline} />)}
     {motion && <RoomDoor motion={motion} onComplete={finishDoor} />}

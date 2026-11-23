@@ -68,10 +68,10 @@ export class DiceConnection {
   private impactListeners = new Set<(hits: readonly Impact[]) => void>();
   private readonly key: string;
 
-  constructor(private readonly development: boolean, room: string) {
+  constructor(private readonly development: boolean, room: string, initialToken?: string) {
     this.room = roomName(room);
     this.key = `atelier-noir-dice:${this.room}`;
-    try { this.token = sessionStorage.getItem(this.key) ?? undefined; }
+    try { this.token = initialToken ?? sessionStorage.getItem(this.key) ?? undefined; }
     catch { this.token = undefined; }
   }
 

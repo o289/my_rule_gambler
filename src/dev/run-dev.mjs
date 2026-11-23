@@ -32,6 +32,5 @@ function start(label, command, args, env = process.env) {
 process.once('SIGINT', () => stopAll(0));
 process.once('SIGTERM', () => stopAll(0));
 
-start('dice-server', process.execPath, ['--import', 'tsx', 'src/platform/local-demo-servers/dice/server/start.ts']);
-start('casino-entry-server', process.execPath, ['--import', 'tsx', 'src/platform/local-demo-servers/casino-entry/server/start.ts']);
+start('local-game-servers', process.execPath, ['--import', 'tsx', 'src/platform/local-demo-servers/start-local.ts']);
 start('vite-plus', 'vp', ['dev', '--host', '127.0.0.1', '--port', '5178', '--strictPort']);
