@@ -1,5 +1,7 @@
 import { parseJson, readServerMessage, roomName } from '../../../shared/contracts/dice';
 import type { ClientMessage, Frame, GameState, Impact, Metrics, RollView, ServerMessage } from '../../../shared/contracts/dice';
+import { confirmedPlacement } from '../model/placement-feedback';
+import type { PlacementFeedback } from '../model/placement-feedback';
 
 interface Sample { frame: Frame; arrived: number }
 
@@ -48,11 +50,12 @@ export interface ConnectionView {
   problem: string;
   metrics: Metrics | null;
   pending: boolean;
+  placement: PlacementFeedback | null;
 }
 
 const HOLD: ConnectionView = {
   status: 'connecting', playerId: null, dev: false, game: null, roll: null, tray: null,
-  problem: '', metrics: null, pending: false,
+  problem: '', metrics: null, pending: false, placement: null,
 };
 
 export class DiceConnection {
@@ -140,7 +143,7 @@ export class DiceConnection {
         this.update({
           status: 'online', playerId: message.playerId, game: message.state, roll: message.roll,
           dev: message.dev, tray: message.view ? message.roll?.id ?? null : null,
-          pending: false, problem: '',
+          pending: false, problem: '', placement: null,
         });
         break;
       case 'state': {
@@ -148,6 +151,9 @@ export class DiceConnection {
         if (message.roll) this.frames.push(message.roll.latest);
         this.update({
           game: message.state, roll: message.roll, pending: false,
+          placement: this.current.game?.boardSeed === message.state.boardSeed
+            ? confirmedPlacement(this.current.game, message.state) ?? this.current.placement
+            : null,
           tray: newRoll ? message.roll?.id ?? null : this.current.tray,
           metrics: newRoll ? null : this.current.metrics,
           problem: '',

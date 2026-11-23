@@ -10,26 +10,6 @@
   animation: score-tile 380ms ease-out both;
 }
 
-.score-result {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 34px;
-  padding: 7px 2px 0;
-  color: #cfb698;
-  font-size: .8125rem;
-}
-
-.score-result strong {
-  color: #ffe4ae;
-  overflow-wrap: anywhere;
-  font: 700 1.18rem Georgia, var(--serif);
-  text-align: right;
-}
-
-.score-result strong[data-negative="true"] { color: #ffd1b9; }
-
 .score-beam {
   position: absolute;
   z-index: 5;

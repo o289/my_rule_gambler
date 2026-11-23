@@ -2,6 +2,7 @@ import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
 import { GamblerBoard } from '../../board/ui/GamblerBoard';
+import { cellKey } from '../../board/model/board-model';
 import type { BoardDefinition, BoardState, CellAddress } from '../../board/model/board-model';
 import { GEMS } from '../../board/model/gems';
 import '../../board/ui/style.css';
@@ -12,6 +13,7 @@ import type { ConnectionView } from './connection';
 import { PerformanceMonitor } from './monitor';
 import { DiceSound } from './sound';
 import { preloadDice } from './face-canvases';
+import { placementCandidates } from '../model/placement-feedback';
 import './style.css';
 
 
@@ -30,7 +32,7 @@ export interface DiceBoardContext {
 
 export interface DiceBoardAdapter {
   getDefinition: (seed: number | undefined) => BoardDefinition;
-  createState: (definition: BoardDefinition, game: GameState | null, active: DiceResult | undefined) => BoardState;
+  createState: (definition: BoardDefinition, game: GameState | null) => BoardState;
   onSelect: (cell: CellAddress, context: DiceBoardContext) => void;
 }
 
@@ -137,15 +139,25 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const canAct = own && info.status === 'online' && !info.pending;
   const [monitor, setMonitor] = useState(false);
   const [fps, setFps] = useState<number | null>(null);
-  const [selectedId, setSelectedId] = useState<string>();
+  const [choice, setChoice] = useState<{ rollId: string; dieId: string }>();
   const selected = useMemo(() => {
-    const remaining = game?.results.filter(result => game.remaining.includes(result.id));
-    return remaining?.find(result => result.id === selectedId) ?? remaining?.[0];
-  }, [game, selectedId]);
+    if (!choice || choice.rollId !== roll?.id || !game?.remaining.includes(choice.dieId)) return undefined;
+    return game.results.find(result => result.id === choice.dieId);
+  }, [game, roll?.id, choice]);
   const seed = game?.boardSeed;
   const definition = useMemo(() => boardAdapter.getDefinition(seed), [boardAdapter, seed]);
-  const board = useMemo(() => boardAdapter.createState(definition, game, own && inPlacement ? selected : undefined),
-    [boardAdapter, definition, game, own, inPlacement, selected]);
+  const board = useMemo(() => {
+    const state = boardAdapter.createState(definition, game);
+    const placement = info.placement;
+    if (!placement) return state;
+    const rowId = definition.rows[placement.row]?.id;
+    const columnId = definition.columns[placement.column]?.id;
+    if (!rowId || !columnId) return state;
+    return { ...state, placement: { cell: cellKey({ rowId, columnId }), id: placement.revision } };
+  }, [boardAdapter, definition, game, info.placement]);
+  const candidates = useMemo(() => canAct && inPlacement && selected
+    ? placementCandidates(definition, board.occupied, selected.gem)
+    : undefined, [canAct, inPlacement, selected, definition, board.occupied]);
 
   useEffect(() => {
     let previousTray: string | null = null;
@@ -188,7 +200,7 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
     <div className="salon-title"><h1>宝石サイコロ 3D</h1><span role="status">{seat?.name ?? (info.status === 'offline' ? '再接続中' : '接続中')} {seat && (own ? '・あなたの手番' : current ? `・${current.name} の手番` : '')}</span></div>
     <div className="table-layout">
       <div className="game-board">
-        <GamblerBoard board={definition} state={board} viewportRef={null}
+        <GamblerBoard board={definition} state={board} viewportRef={null} candidates={candidates}
           onSelect={cell => boardAdapter.onSelect(cell, { game, roll, selected, canAct, inPlacement, board, definition })} />
       </div>
       <aside className="turn-card" aria-labelledby="turn-title">
@@ -214,7 +226,8 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
         {info.problem && <p className="notice" role="status">{info.problem}</p>}
         <div className="retained"><h3>確定した出目</h3>
           {game?.results.length
-            ? <ResultStrip list={game.results} action={own && inPlacement ? setSelectedId : undefined}
+            ? <ResultStrip list={game.results} action={canAct && inPlacement && roll
+              ? dieId => setChoice({ rollId: roll.id, dieId }) : undefined}
               chosen={selected?.id} remaining={game.remaining} />
             : <span className="waiting-result">出目の確定を待っています。</span>}
         </div>

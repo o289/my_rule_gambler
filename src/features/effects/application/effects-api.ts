@@ -1,5 +1,5 @@
-import { readEffect } from '../model/effect-model';
-import type { EffectCall, EffectKind, EffectScenario } from '../model/effect-model';
+import { readEffect, settlementEffects } from '../model/effect-model';
+import type { EffectCall, EffectKind, EffectScenario, ScoreSettlement } from '../model/effect-model';
 import { EffectPlayer } from './effect-player';
 import type { EffectAudio } from './effect-player';
 
@@ -9,7 +9,6 @@ export interface EffectsAudio extends EffectAudio {
 
 interface DemoOptions {
   otherTurn?: boolean;
-  noPayment?: boolean;
 }
 
 export interface EffectsRuntime {
@@ -19,6 +18,7 @@ export interface EffectsRuntime {
   playDemo: (kind: EffectKind, options?: DemoOptions) => void;
   actions: {
     playEffect: (...call: EffectCall) => void;
+    playSettlement: (settlement: ScoreSettlement) => void;
     replay: () => void;
     skip: () => void;
     reset: () => void;
@@ -36,23 +36,13 @@ export function createEffectsRuntime({
   preloadDice: () => Promise<unknown>;
   reducedMotion: () => boolean;
 }): EffectsRuntime {
-  const player = new EffectPlayer(audio, scenario.turn);
-  let playSequence = 0;
+  const player = new EffectPlayer(audio, scenario);
 
   function startPlayback(request: ReturnType<typeof readEffect>) {
-    const sequence = ++playSequence;
-    const start = () => {
-      if (sequence === playSequence) player.play(request, reducedMotion());
-    };
-    if (request.kind === 'DICE_STOP') {
-      player.reset();
-      void preloadDice().then(start, start);
-      return;
-    }
     if (request.kind === 'ONE_CELL_COMEBACK') {
       void preloadDice().catch(() => undefined);
     }
-    start();
+    player.play(request, reducedMotion());
   }
 
   function read(kind: unknown, params: unknown) {
@@ -66,21 +56,18 @@ export function createEffectsRuntime({
   function playDemo(kind: EffectKind, options: DemoOptions = {}) {
     let params = scenario.demo[kind];
     if (kind === 'TURN_CHANGE' && options.otherTurn) params = { playerName: scenario.turn.nextPlayer.name, isLocal: false };
-    if (kind === 'LOSS_NOTICE' && options.noPayment) params = { ...scenario.demo.LOSS_NOTICE, paidPoints: 0 };
     startPlayback(read(kind, params));
   }
 
   const actions: EffectsRuntime['actions'] = {
     playEffect,
-    replay: () => {
-      const snapshot = player.getSnapshot();
-      if (snapshot) startPlayback(snapshot.request);
+    playSettlement: settlement => {
+      const requests = settlementEffects(settlement).map(([kind, params]) => read(kind, params));
+      player.playAll(requests, reducedMotion());
     },
+    replay: () => player.replay(reducedMotion()),
     skip: () => player.skip(),
-    reset: () => {
-      playSequence += 1;
-      player.reset();
-    },
+    reset: () => player.reset(),
   };
 
   return { player, audio, scenario, playDemo, actions };

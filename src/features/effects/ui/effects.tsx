@@ -1,12 +1,12 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { GEMS } from '../../board/model/gems';
-import { GemDie3D } from '../../dice/ui/3d/GemDie3D';
+import { requiredGemAt } from '../../board/model/board-model';
 import { BoardScene, ConvergingLights, GemFlight, locateCell } from './board-scene';
-import { lossLabel, rankOrder, turnLabel } from '../model/effect-model';
+import { rankOrder, scoreLabel, turnLabel } from '../model/effect-model';
 import type { EffectKind, EffectParams, EffectRequest, EffectScenario } from '../model/effect-model';
 import { TurnScene } from './turn-scene';
-import { LossNoticeEffect, TurnChangeEffect } from './settlement-scenes';
+import { TurnChangeEffect } from './settlement-scenes';
 import { reached } from '../application/effect-player';
 import type { EffectPlayback } from '../application/effect-player';
 import { centerWithin, CountUp, GoldParticles, GoldText, ScreenFlash, Shockwave, useScreenShake } from './visuals';
@@ -23,18 +23,6 @@ interface SharedSceneProps {
 
 interface ScenarioSceneProps extends SharedSceneProps { scenario: EffectScenario }
 
-export function DiceStopEffect({ playback, params }: SharedSceneProps & { params: EffectParams['DICE_STOP'] }) {
-  return (
-    <div className="dice-scene">
-      <div className="dice-inlay" aria-hidden="true" />
-      <GemDie3D gem={params.gem} animate={!playback.skipped} />
-      {reached(playback, 'glow') && <div className="dice-gem-label" style={{ color: GEMS[params.gem].color }}>
-        <img src={GEMS[params.gem].image} alt="" />{GEMS[params.gem].name}
-      </div>}
-    </div>
-  );
-}
-
 export function GemPlacementEffect({ playback, params, stage, scenario }: ScenarioSceneProps & { params: EffectParams['GEM_PLACEMENT'] }) {
   const board = useRef<HTMLElement>(null);
   const source = useRef<HTMLDivElement>(null);
@@ -49,7 +37,8 @@ export function GemPlacementEffect({ playback, params, stage, scenario }: Scenar
 
   return (
     <>
-      <BoardScene viewportRef={board} definition={scenario.board} target={params.target} placed={placed ? params.gem : undefined} tone="gold" />
+      <BoardScene viewportRef={board} definition={scenario.board} target={params.target} placed={placed ? params.gem : undefined}
+        placementId={placed && !playback.skipped ? playback.id : undefined} tone="gold" />
       <div className="placement-source" ref={source} data-spent={placed || (launched && animate)} aria-hidden="true">
         <img src={GEMS[params.gem].image} alt="" />
       </div>
@@ -61,6 +50,13 @@ export function GemPlacementEffect({ playback, params, stage, scenario }: Scenar
 
 function TitleFlourish() {
   return <img src={filigree} className="title-flourish" alt="" aria-hidden="true" />;
+}
+
+function BoardScoreEffect({ playback, params, scenario }: ScenarioSceneProps & { params: EffectParams['BOARD_SCORE'] }) {
+  const { target, points } = params;
+  return <BoardScene definition={scenario.board} target={target} placed={requiredGemAt(scenario.board, target)}
+    award={playback.playing ? { id: playback.id, rowId: target.rowId, amount: points } : null}
+    scoreNotice={{ rowId: target.rowId, label: scoreLabel(points) }} />;
 }
 
 export function BigWinEffect({ playback, params, stage, scenario }: ScenarioSceneProps & { params: EffectParams['BIG_WIN'] }) {
@@ -138,7 +134,9 @@ function Ranking({ params, after, highlight, reduced }: { params: EffectParams['
         <li key={name} data-player={name} data-rank={index + 1} data-contender={name === params.playerName} data-winner={name === params.playerName && highlight}>
           <span className="rank-number">{index + 1}<span className="sr-only">位</span></span>
           <span className="rank-name">{name}</span>
-          {after && name === params.playerName && <span className="rank-change">↑ {params.fromRank - params.toRank}</span>}
+          {after && name === params.playerName && <span className="rank-change" data-down={params.toRank > params.fromRank}>
+            {params.toRank > params.fromRank ? '↓' : '↑'} {Math.abs(params.fromRank - params.toRank)}
+          </span>}
         </li>
       ))}
     </ol>
@@ -204,11 +202,11 @@ export function JackpotVictoryEffect({ playback, params, stage, scenario }: Scen
   );
 }
 
-export function EffectScene({ playback, stage, scenario, settleRoll, onRoll }: ScenarioSceneProps & { settleRoll: (id: number) => void; onRoll: () => void }) {
+export function EffectScene({ playback, stage, scenario, settleRoll }: ScenarioSceneProps & { settleRoll: (id: number) => void }) {
   const { request } = playback;
   switch (request.kind) {
-    case 'DICE_STOP': return <DiceStopEffect playback={playback} params={request.params} stage={stage} />;
     case 'GEM_PLACEMENT': return <GemPlacementEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
+    case 'BOARD_SCORE': return <BoardScoreEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
     case 'BIG_WIN': return <BigWinEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
     case 'ONE_CELL_COMEBACK': {
       const ranking = request.params.gem === scenario.turn.comebackGem && reached(playback, 'comeback');
@@ -217,8 +215,7 @@ export function EffectScene({ playback, stage, scenario, settleRoll, onRoll }: S
         {ranking && <ComebackEffect playback={playback} params={scenario.turn.comebackRank} stage={stage} />}
       </>;
     }
-    case 'TURN_CHANGE': return <TurnChangeEffect playback={playback} params={request.params} scenario={scenario} onRoll={onRoll} />;
-    case 'LOSS_NOTICE': return <LossNoticeEffect playback={playback} params={request.params} scenario={scenario} />;
+    case 'TURN_CHANGE': return <TurnChangeEffect playback={playback} params={request.params} scenario={scenario} />;
     case 'COMEBACK': return <ComebackEffect playback={playback} params={request.params} stage={stage} />;
     case 'JACKPOT_VICTORY': return <JackpotVictoryEffect playback={playback} params={request.params} stage={stage} scenario={scenario} />;
   }
@@ -226,18 +223,17 @@ export function EffectScene({ playback, stage, scenario, settleRoll, onRoll }: S
 
 export function outcome({ kind, params }: EffectRequest, scenario: EffectScenario) {
   switch (kind) {
-    case 'DICE_STOP': return GEMS[params.gem].name;
     case 'GEM_PLACEMENT': return `${GEMS[params.gem].name}を配置しました`;
+    case 'BOARD_SCORE': return `${params.playerName}　${scoreLabel(params.points)}`;
     case 'BIG_WIN': return `${params.playerName}　+${params.points.toLocaleString('ja-JP')}点`;
     case 'ONE_CELL_COMEBACK':
       return params.gem === scenario.turn.comebackGem ? `${scenario.turn.comebackRank.playerName}　${scenario.turn.comebackRank.fromRank}位 → ${scenario.turn.comebackRank.toRank}位` : `${GEMS[params.gem].name}　逆転ならず`;
     case 'TURN_CHANGE': return turnLabel(params);
-    case 'LOSS_NOTICE': return `${params.playerName}　${lossLabel(params.paidPoints)}`;
     case 'COMEBACK': return `${params.playerName}　${params.fromRank}位 → ${params.toRank}位`;
     case 'JACKPOT_VICTORY': return `勝者　${params.playerName}`;
   }
 }
 
 export const EFFECT_ICONS: Record<EffectKind, string> = {
-  DICE_STOP: '◇', GEM_PLACEMENT: '◈', BIG_WIN: '✦', ONE_CELL_COMEBACK: '◆', TURN_CHANGE: '♔', LOSS_NOTICE: '−', COMEBACK: 'ϟ', JACKPOT_VICTORY: '♛',
+  GEM_PLACEMENT: '◈', BOARD_SCORE: '±', BIG_WIN: '✦', ONE_CELL_COMEBACK: '◆', TURN_CHANGE: '♔', COMEBACK: 'ϟ', JACKPOT_VICTORY: '♛',
 };

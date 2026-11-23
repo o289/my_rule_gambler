@@ -1,5 +1,5 @@
 import { beatsFor, effectDuration } from '../model/effect-model';
-import type { Beat, Cue, EffectRequest, EffectTurnScenario } from '../model/effect-model';
+import type { Beat, Cue, EffectRequest, EffectScenario } from '../model/effect-model';
 
 export interface EffectPlayback {
   readonly id: number;
@@ -45,8 +45,10 @@ export class EffectPlayer {
   private sequence = 0;
   private playback: EffectPlayback | null = null;
   private continuation: RollContinuation | null = null;
+  private requests: readonly EffectRequest[] = [];
+  private nextIndex = 0;
 
-  constructor(private audio: EffectAudio, private turnScenario: EffectTurnScenario, private clock = browserClock) {}
+  constructor(private audio: EffectAudio, private scenario: Pick<EffectScenario, 'board' | 'turn'>, private clock = browserClock) {}
 
   getSnapshot = () => this.playback;
 
@@ -89,6 +91,7 @@ export class EffectPlayer {
         const kind = current.request.kind === 'ONE_CELL_COMEBACK' && current.cues.has('comeback')
           ? 'COMEBACK' : current.request.kind;
         this.audio.playCue(kind, cue, current.reduced);
+        if (cue === 'finish') this.playNext(current.reduced);
       };
       if (at === offset) trigger();
       else this.schedule(started + at - offset, trigger);
@@ -96,9 +99,26 @@ export class EffectPlayer {
   }
 
   play(request: EffectRequest, reduced: boolean) {
+    this.playAll([request], reduced);
+  }
+
+  playAll(requests: readonly EffectRequest[], reduced: boolean) {
+    if (!requests.length) {
+      this.reset();
+      return;
+    }
+    this.requests = requests;
+    this.nextIndex = 0;
+    this.playNext(reduced);
+  }
+
+  private playNext(reduced: boolean) {
+    const request = this.requests[this.nextIndex];
+    if (!request) return;
+    this.nextIndex += 1;
     this.stopPending();
     const id = ++this.sequence;
-    const beats = beatsFor(request, reduced, this.turnScenario);
+    const beats = beatsFor(request, reduced, this.scenario);
     const started = this.clock.now();
     this.publish({
       id, request, duration: effectDuration(beats), phase: 'start',
@@ -139,15 +159,18 @@ export class EffectPlayer {
     if (!current?.playing) return;
     this.stopPending();
     this.publish({ ...current, phase: 'finish', playing: false, skipped: true });
+    if (this.playback?.id === current.id) this.playNext(current.reduced);
   }
 
   reset() {
     this.stopPending();
+    this.requests = [];
+    this.nextIndex = 0;
     this.publish(null);
   }
 
   replay(reduced: boolean) {
-    if (this.playback) this.play(this.playback.request, reduced);
+    if (this.playback) this.playAll(this.requests, reduced);
   }
 }
 

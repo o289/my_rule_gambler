@@ -150,19 +150,8 @@ export class SoundManager implements EffectAudio {
       case 'TURN_CHANGE':
         if (cue === 'start') this.goldChime(at, .045);
         break;
-      case 'LOSS_NOTICE':
-        if (cue === 'place') this.weight(at, .19, .16);
-        if (cue === 'charge') this.burst(at, .32, .16, 1160, 'bandpass');
-        if (cue === 'flight') this.tone({ at, length: .56, frequency: 650, end: 296, gain: .04, attack: .14 });
-        if (cue === 'reveal') {
-          this.weight(at, .18, .17);
-          this.tone({ at, frequency: 1040, end: 810, gain: .055, length: .22, type: 'triangle' });
-        }
-        break;
-      case 'DICE_STOP':
-        if (cue === 'start' && !reduced) this.rollSound(at);
-        if (cue === 'impact') this.weight(at, .22, .26);
-        if (cue === 'glow') this.goldChime(at, .056);
+      case 'BOARD_SCORE':
+        if (cue === 'start') this.goldChime(at, .041);
         break;
       case 'ONE_CELL_COMEBACK':
         if (cue === 'roll' && !reduced) this.rollSound(at);

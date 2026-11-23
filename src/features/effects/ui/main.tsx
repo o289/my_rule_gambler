@@ -1,5 +1,5 @@
 import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
-import { Fragment, StrictMode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Fragment, StrictMode, useRef, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
 import type { EffectsRuntime } from '../application/effects-api';
 import '../../board/ui/style.css';
@@ -8,12 +8,10 @@ import { BoardScene } from './board-scene';
 import { EFFECT_LABELS } from '../model/effect-model';
 import type { EffectKind } from '../model/effect-model';
 import { EffectScene, EFFECT_ICONS, outcome } from './effects';
-import { REDUCED_SCORE_MS, scoreTimings } from './board-score/board-motion';
 import './board-score/score-effect.css';
-import { playableColumns } from '../../board/model/board-model';
-import type { BoardAward } from '../../board/model/board-model';
+import { goalColumn } from '../../board/model/board-model';
 
-const keys: EffectKind[] = ['DICE_STOP', 'GEM_PLACEMENT', 'BIG_WIN', 'COMEBACK', 'JACKPOT_VICTORY', 'ONE_CELL_COMEBACK', 'TURN_CHANGE', 'LOSS_NOTICE'];
+const keys: EffectKind[] = ['GEM_PLACEMENT', 'BOARD_SCORE', 'BIG_WIN', 'COMEBACK', 'JACKPOT_VICTORY', 'ONE_CELL_COMEBACK', 'TURN_CHANGE'];
 
 function App({ runtime }: { runtime: EffectsRuntime }) {
   useAudioActivation(runtime.audio.unlock);
@@ -22,46 +20,27 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
   const scenario = runtime.scenario;
   const current = playback?.request.kind;
   const [otherTurn, setOtherTurn] = useState(false);
-  const [noPayment, setNoPayment] = useState(false);
-  const [scoreAward, setScoreAward] = useState<BoardAward | null>(null);
-  const [scoreResult, setScoreResult] = useState<BoardAward | null>(null);
-  const [scoreReduced, setScoreReduced] = useState(false);
-  const scoreSequence = useRef(0);
-  const scoreRow = scenario.board.rows[0];
-  const scoreLength = scoreRow ? playableColumns(scenario.board, scoreRow).length : 0;
-  const reducedMotion = useSyncExternalStore(
-    listener => {
-      const media = matchMedia('(prefers-reduced-motion: reduce)');
-      media.addEventListener('change', listener);
-      return () => media.removeEventListener('change', listener);
-    },
-    () => matchMedia('(prefers-reduced-motion: reduce)').matches,
-  );
-  const status = playback ? (playback.playing ? '再生中' : '演出完了') : scoreAward ? '得点演出中' : scoreResult ? '得点演出完了' : '準備完了';
+  const [scoreMode, setScoreMode] = useState('rank-change');
+  const penalty = scenario.board.rows.find(row => row.score < 0);
+  const penaltyGoal = penalty && goalColumn(scenario.board, penalty);
+  const status = playback ? (playback.playing ? '再生中' : '演出完了') : '準備完了';
   const subtitle = playback && !playback.playing ? outcome(playback.request, scenario)
-    : scoreAward ? `${scoreAward.amount > 0 ? '+' : ''}${scoreAward.amount}点`
-      : scoreResult ? `${scoreResult.amount > 0 ? '+' : ''}${scoreResult.amount}点`
-        : (current ? EFFECT_LABELS[current] : '演出を選んで再生');
+    : current ? EFFECT_LABELS[current] : '演出を選んで再生';
   const progress: (CSSProperties & { '--play-duration': string }) | undefined = playback && { '--play-duration': `${playback.duration}ms` } || undefined;
 
-  useEffect(() => {
-    if (!scoreAward) return;
-    const duration = scoreReduced ? REDUCED_SCORE_MS : scoreTimings(scoreLength).total;
-    const timer = window.setTimeout(() => {
-      setScoreResult(scoreAward);
-      setScoreAward(null);
-    }, duration);
-    return () => window.clearTimeout(timer);
-  }, [scoreAward, scoreReduced, scoreLength]);
-
   function playScoreEffect() {
-    if (!scoreRow || scoreAward) return;
-    runtime.actions.reset();
-    const award = { id: ++scoreSequence.current, rowId: scoreRow.id, amount: scoreRow.score };
-    setScoreResult(null);
-    setScoreReduced(reducedMotion);
-    setScoreAward(award);
-    showStage();
+    const gain = scenario.demo.BOARD_SCORE;
+    if (penalty && penaltyGoal && (scoreMode === 'loss' || scoreMode === 'zero')) {
+      runtime.actions.playSettlement({
+        score: { ...gain, points: scoreMode === 'loss' ? penalty.score : 0,
+          target: { rowId: penalty.id, columnId: penaltyGoal.id } },
+      });
+      return;
+    }
+    runtime.actions.playSettlement({
+      score: gain,
+      rankChange: scoreMode === 'rank-change' ? scenario.demo.COMEBACK : undefined,
+    });
   }
 
   function showStage() {
@@ -72,10 +51,9 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
   }
 
   function playDemo(kind: EffectKind) {
-    setScoreAward(null);
-    setScoreResult(null);
     showStage();
-    runtime.playDemo(kind, { otherTurn, noPayment });
+    if (kind === 'BOARD_SCORE') playScoreEffect();
+    else runtime.playDemo(kind, { otherTurn });
   }
 
   return (
@@ -101,7 +79,7 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
             <div className="stage-surface" aria-hidden="true" />
             <div className="stage-corners" aria-hidden="true"><i /><i /><i /><i /></div>
             {playback ? <EffectScene key={playback.id} playback={playback} stage={stage} scenario={scenario}
-              settleRoll={id => runtime.player.settleRoll(id)} onRoll={() => playDemo('DICE_STOP')} /> : <BoardScene definition={scenario.board} award={scoreAward} />}
+              settleRoll={id => runtime.player.settleRoll(id)} /> : <BoardScene definition={scenario.board} />}
           </div>
           <div className="stage-footer">
             {playback && <div className="progress-rail" aria-hidden="true">
@@ -114,7 +92,7 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
             <div className="transport" aria-label="再生操作">
               <button type="button" onClick={() => { showStage(); runtime.actions.replay(); }} disabled={!playback}>リプレイ</button>
               <button type="button" onClick={runtime.actions.skip} disabled={!playback?.playing}>スキップ</button>
-              <button type="button" onClick={() => { setScoreAward(null); setScoreResult(null); runtime.actions.reset(); }}>リセット</button>
+              <button type="button" onClick={runtime.actions.reset}>リセット</button>
             </div>
           </div>
         </section>
@@ -136,24 +114,19 @@ function App({ runtime }: { runtime: EffectsRuntime }) {
                     <option value="other">手番交代後（他の人）</option>
                   </select>
                 </label>}
-                {kind === 'LOSS_NOTICE' && <label className="effect-setting">
-                  確定した支払額
-                  <select value={noPayment ? 'zero' : 'paid'} onChange={event => setNoPayment(event.currentTarget.value === 'zero')}>
-                    <option value="paid">{scenario.demo.LOSS_NOTICE.paidPoints}点</option>
-                    <option value="zero">0点</option>
+                {kind === 'BOARD_SCORE' && <label className="effect-setting">
+                  得失点の例
+                  <select value={scoreMode} onChange={event => setScoreMode(event.currentTarget.value)}>
+                    <option value="rank-change">得点・順位変動あり</option>
+                    <option value="gain">得点・順位変動なし</option>
+                    {penaltyGoal && <>
+                      <option value="loss">失点・支払いあり</option>
+                      <option value="zero">失点・支払いなし</option>
+                    </>}
                   </select>
                 </label>}
               </Fragment>
             ))}
-            <button type="button" data-effect-button="BOARD_SCORE" aria-pressed={Boolean(scoreAward)} disabled={!scoreRow || Boolean(scoreAward)} onClick={playScoreEffect}>
-              <span className="effect-icon" aria-hidden="true">✦</span>
-              <span>得点演出{scoreRow ? `（${scoreRow.score > 0 ? '+' : ''}${scoreRow.score}点）` : ''}</span>
-              <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true"><path d="m4 2 5 4-5 4Z" fill="currentColor" /></svg>
-            </button>
-            <div className="score-result" role="status" aria-live="polite" aria-atomic="true">
-              <span>得点演出の結果</span>
-              <strong data-negative={Boolean(scoreResult && scoreResult.amount < 0)}>{scoreResult ? `${scoreResult.amount > 0 ? '+' : ''}${scoreResult.amount}点` : '—'}</strong>
-            </div>
           </div>
         </aside>
       </div>

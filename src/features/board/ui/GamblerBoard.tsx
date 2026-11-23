@@ -66,6 +66,7 @@ interface BoardProps {
   viewportRef: Ref<HTMLElement>;
   onSelect: (cell: CellAddress) => void;
   scoreNotice?: { rowId: string; label: string };
+  candidates?: ReadonlySet<string>;
 }
 
 type BoardStyle = CSSProperties & {
@@ -81,7 +82,7 @@ function formatShortState(state: CellState, gem?: GemId) {
   return state === 'available' ? '次に配置できるマス' : '未配置';
 }
 
-export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice }: BoardProps) {
+export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice, candidates }: BoardProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const cabinet = useRef<HTMLDivElement>(null);
   const [isOverflowing, setOverflowing] = useState(false);
@@ -129,7 +130,9 @@ export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice 
                     const blocked = playableIndex < 0;
                     const expected = blocked ? undefined : requiredGemAt(board, address);
                     const gem = blocked ? undefined : state.occupied.get(key);
-                    const selected = !blocked && state.selection?.rowId === row.id && state.selection.columnId === column.id;
+                    const selected = candidates
+                      ? candidates.has(key)
+                      : !blocked && state.selection?.rowId === row.id && state.selection.columnId === column.id;
                     const cellState = blocked ? 'blocked' : gem ? 'occupied' : next?.columnId === column.id ? 'available' : 'empty';
                     const isGoal = goal?.id === column.id;
                     const gemName = expected ? `、指定 ${GEMS[expected].name}` : '';

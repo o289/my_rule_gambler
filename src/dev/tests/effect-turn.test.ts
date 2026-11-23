@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { canSelect, cellKey, initialState } from '../../features/board/model/board-model';
 import { EffectPlayer } from '../../features/effects/application/effect-player';
-import { beatsFor, lossCoins, lossLabel, readEffect, turnLabel } from '../../features/effects/model/effect-model';
+import { beatsFor, readEffect, scoreLabel, settlementEffects, turnLabel } from '../../features/effects/model/effect-model';
 import type { Cue, EffectKind } from '../../features/effects/model/effect-model';
 import {
   COMEBACK_BOARD, COMEBACK_GEM, COMEBACK_SCORE, CURRENT_PLAYER, LAST_CELL,
@@ -19,7 +19,7 @@ function playbackFixture() {
   const player = new EffectPlayer({
     cut() {},
     playCue(kind, cue) { sounded.push([kind, cue]); },
-  }, EFFECT_PREVIEW_SCENARIO.turn, {
+  }, EFFECT_PREVIEW_SCENARIO, {
     now: () => now,
     schedule(callback, delay) {
       const id = ++sequence;
@@ -61,7 +61,7 @@ test('the amethyst demo has one eligible empty +100 cell and the award makes a u
 test('the observed roll stop fires once and placement precedes reuse of the COMEBACK cues', () => {
   const { player, advance, sounded } = playbackFixture();
   const request = readEffect('ONE_CELL_COMEBACK', { gem: COMEBACK_GEM });
-  const beats = beatsFor(request, false, EFFECT_PREVIEW_SCENARIO.turn);
+  const beats = beatsFor(request, false, EFFECT_PREVIEW_SCENARIO);
   const stop = beats.find(beat => beat.cue === 'roll-stop');
   const placement = beats.find(beat => beat.cue === 'place');
   const comeback = beats.find(beat => beat.cue === 'comeback');
@@ -122,24 +122,68 @@ test('turn announcements use each viewer’s role and only run the entry cue onc
   assert.deepEqual(sounded.filter(([, cue]) => cue === 'start'), [['TURN_CHANGE', 'start']]);
 });
 
-test('the loss preview uses the confirmed payment and only opens the vault for a positive payment', () => {
-  const { demo, featuredCell } = EFFECT_PREVIEW_SCENARIO;
-  const details = demo.LOSS_NOTICE;
-  const board = { ...SAMPLE_BOARD, rows: SAMPLE_BOARD.rows.map(row => row.id === details.target.rowId ? { ...row, score: -50 } : row) };
-  const context = { board, featuredCell };
-  for (const paidPoints of [0, 10]) {
+test('the shared score effect formats an award, a capped payment, and no payment', () => {
+  const scenario = EFFECT_PREVIEW_SCENARIO;
+  const penalty = { rowId: 'penalty', columnId: 'ruby' };
+  const board = { ...SAMPLE_BOARD, rows: SAMPLE_BOARD.rows.map(row => row.id === penalty.rowId ? { ...row, score: -50 } : row) };
+  const context = { board, featuredCell: scenario.featuredCell };
+  const gain = readEffect('BOARD_SCORE', scenario.demo.BOARD_SCORE, context);
+  assert.equal(gain.kind, 'BOARD_SCORE');
+  assert.equal(scoreLabel(100), '+100点');
+  for (const points of [-10, 0]) {
     const { player, advance, sounded } = playbackFixture();
-    const request = readEffect('LOSS_NOTICE', { ...details, paidPoints }, context);
-    assert.equal(lossLabel(paidPoints), paidPoints ? '−10点' : '支払いなし');
-    assert.deepEqual(lossCoins(paidPoints).map(coin => coin.value), paidPoints ? [10] : []);
+    const request = readEffect('BOARD_SCORE', { playerName: CURRENT_PLAYER.name, target: penalty, points }, context);
+    assert.equal(scoreLabel(points), points ? '−10点' : '支払いなし');
     player.play(request, false);
     advance(5000);
-    assert.deepEqual(sounded.map(([, cue]) => cue), paidPoints
-      ? ['start', 'place', 'charge', 'flight', 'reveal', 'finish']
-      : ['start', 'place', 'finish']);
+    assert.deepEqual(sounded, [['BOARD_SCORE', 'start'], ['BOARD_SCORE', 'finish']]);
     assert.equal(player.getSnapshot()?.playing, false);
-    assert.ok(!beatsFor(request, true, EFFECT_PREVIEW_SCENARIO.turn).some(beat => beat.cue === 'flight'));
   }
-  assert.throws(() => readEffect('LOSS_NOTICE', { ...details, target: featuredCell }, context), RangeError);
-  assert.throws(() => readEffect('LOSS_NOTICE', { ...details, paidPoints: 60 }, context), RangeError);
+  const score = { playerName: CURRENT_PLAYER.name, target: penalty, points: -60 };
+  assert.throws(() => readEffect('BOARD_SCORE', score, context), RangeError);
+  assert.throws(() => readEffect('BOARD_SCORE', { ...score, target: scenario.featuredCell }, context), RangeError);
+});
+
+test('settlement queues big wins before rank changes and handles point and rank boundaries', () => {
+  const { BOARD_SCORE: score, COMEBACK: moved } = EFFECT_PREVIEW_SCENARIO.demo;
+  const down = { ...moved, fromRank: 1, toRank: 2 };
+  const unchanged = { ...moved, toRank: moved.fromRank };
+  assert.deepEqual(settlementEffects({ score: { ...score, points: 99 }, rankChange: moved }).map(([kind]) => kind),
+    ['BOARD_SCORE', 'COMEBACK']);
+  assert.deepEqual(settlementEffects({ score, rankChange: moved }).map(([kind]) => kind),
+    ['BOARD_SCORE', 'BIG_WIN', 'COMEBACK']);
+  assert.deepEqual(settlementEffects({ score: { ...score, points: 125 }, rankChange: unchanged }).map(([kind]) => kind),
+    ['BOARD_SCORE', 'BIG_WIN']);
+  assert.deepEqual(settlementEffects({ score: { ...score, points: -10 }, rankChange: down }).map(([kind]) => kind),
+    ['BOARD_SCORE', 'COMEBACK']);
+  assert.deepEqual(settlementEffects({ score, rankChange: moved, gameEnded: true }).map(([kind]) => kind), ['BOARD_SCORE']);
+  assert.doesNotThrow(() => readEffect('COMEBACK', down));
+  assert.throws(() => readEffect('BIG_WIN', { ...score, points: 99 }), RangeError);
+});
+
+test('the settlement player finishes or skips BIG WIN before COMEBACK and replays the sequence', () => {
+  const { player, advance, sounded } = playbackFixture();
+  const { BOARD_SCORE: score, COMEBACK: rankChange } = EFFECT_PREVIEW_SCENARIO.demo;
+  const effects = settlementEffects({ score, rankChange }).map(([kind, params]) => readEffect(kind, params));
+  const scoreTime = beatsFor(effects[0]!, false, EFFECT_PREVIEW_SCENARIO).at(-1)!.at;
+  player.playAll(effects, false);
+  assert.equal(player.getSnapshot()?.request.kind, 'BOARD_SCORE');
+  advance(scoreTime);
+  assert.equal(player.getSnapshot()?.request.kind, 'BIG_WIN');
+  advance(scoreTime + 3700);
+  assert.equal(player.getSnapshot()?.request.kind, 'BIG_WIN');
+  advance(scoreTime + 3780);
+  assert.equal(player.getSnapshot()?.request.kind, 'COMEBACK');
+  assert.ok(sounded.findIndex(([kind, cue]) => kind === 'BIG_WIN' && cue === 'finish')
+    < sounded.findIndex(([kind, cue]) => kind === 'COMEBACK' && cue === 'start'));
+
+  player.replay(false);
+  assert.equal(player.getSnapshot()?.request.kind, 'BOARD_SCORE');
+  player.skip();
+  assert.equal(player.getSnapshot()?.request.kind, 'BIG_WIN');
+  player.skip();
+  assert.equal(player.getSnapshot()?.request.kind, 'COMEBACK');
+  player.reset();
+  advance(20_000);
+  assert.equal(player.getSnapshot(), null);
 });

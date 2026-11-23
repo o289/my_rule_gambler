@@ -1,9 +1,8 @@
-import { canPlaceGem, cellKey, initialState, nextOpenCell, requiredGemAt } from '../../features/board/model/board-model';
+import { canPlaceGem, cellKey, initialState } from '../../features/board/model/board-model';
 import type { BoardDefinition, BoardState, CellAddress } from '../../features/board/model/board-model';
 import { createGoalBoard } from '../../features/board/model/goal-layout';
 import type { DiceBoardAdapter, DiceBoardContext } from '../../features/dice/ui/main';
 import DiceScreen from '../../features/dice/ui/main';
-import type { DiceResult } from '../../shared/contracts/dice';
 import { SAMPLE_BOARD } from '../../dev/preview-data/sample-board';
 import { DiceConnection } from '../../features/dice/ui/connection';
 import { casinoTokenStorageKey } from '../../features/casino-entry/ui/connection';
@@ -18,7 +17,7 @@ const casinoToken = gameRoom ? (() => {
 const connection = new DiceConnection(!gameRoom && params.get('dev') === '1', room, casinoToken);
 const legacyDefinition = { ...SAMPLE_BOARD, rows: SAMPLE_BOARD.rows.map(row => ({ id: row.id, score: row.score })) };
 
-function createBoardState(definition: BoardDefinition, game: DiceBoardContext['game'], active: DiceResult | undefined): BoardState {
+function createBoardState(definition: BoardDefinition, game: DiceBoardContext['game']): BoardState {
   const state = initialState(definition);
   const occupied = new Map(state.occupied);
   for (const { row, column, gem } of game?.placements ?? []) {
@@ -26,9 +25,7 @@ function createBoardState(definition: BoardDefinition, game: DiceBoardContext['g
     const columnId = definition.columns[column]?.id;
     if (rowId && columnId) occupied.set(cellKey({ rowId, columnId }), gem);
   }
-  const selection = active ? definition.rows.map(row => nextOpenCell(definition, occupied, row.id))
-    .find(cell => cell && requiredGemAt(definition, cell) === active.gem) ?? null : null;
-  return { ...state, occupied, selection };
+  return { ...state, occupied, selection: null };
 }
 
 function onSelect(cell: CellAddress, context: DiceBoardContext) {

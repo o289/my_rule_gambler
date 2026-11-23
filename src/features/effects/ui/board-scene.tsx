@@ -23,10 +23,11 @@ interface BoardSceneProps {
   scoreNotice?: { rowId: string; label: string };
   aim?: 'outline' | 'pulse';
   placed?: GemId;
+  placementId?: number;
   tone?: 'gold' | 'gem';
 }
 
-export const BoardScene = memo(function BoardScene({ viewportRef, target, definition, award, scoreNotice, aim, placed, tone }: BoardSceneProps) {
+export const BoardScene = memo(function BoardScene({ viewportRef, target, definition, award, scoreNotice, aim, placed, placementId, tone }: BoardSceneProps) {
   const board = useRef<HTMLElement>(null);
   const state = useMemo(() => {
     const base = initialState(definition);
@@ -36,8 +37,9 @@ export const BoardScene = memo(function BoardScene({ viewportRef, target, defini
       if (placed) occupied.set(key, placed);
       else occupied.delete(key);
     }
-    return { ...base, occupied, selection: target ?? null, award: award ?? null };
-  }, [definition, target, placed, award]);
+    const placement = target && placed && placementId !== undefined ? { cell: cellKey(target), id: placementId } : null;
+    return { ...base, occupied, selection: target ?? null, award: award ?? null, placement };
+  }, [definition, target, placed, award, placementId]);
 
   useLayoutEffect(() => {
     const cell = locateCell(board.current, target);

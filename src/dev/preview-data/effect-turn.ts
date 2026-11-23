@@ -29,12 +29,11 @@ export const TURN_COMEBACK_RANK = {
 };
 
 export const DEMO: EffectParams = {
-  DICE_STOP: { gem: 'sapphire' },
   GEM_PLACEMENT: { gem: 'amethyst', target: LAST_CELL },
+  BOARD_SCORE: { playerName: CURRENT_PLAYER.name, points: targetScore, target: { rowId: 'royal', columnId: 'diamond' } },
   BIG_WIN: { playerName: 'PLAYER 1', points: 100, target: LAST_CELL },
   ONE_CELL_COMEBACK: { gem: COMEBACK_GEM },
   TURN_CHANGE: { playerName: CURRENT_PLAYER.name, isLocal: true },
-  LOSS_NOTICE: { playerName: CURRENT_PLAYER.name, paidPoints: 10, target: { rowId: 'penalty', columnId: 'ruby' } },
   COMEBACK: { playerName: 'PLAYER 1', opponents: ['PLAYER 2', 'PLAYER 3'], fromRank: 3, toRank: 1 },
   JACKPOT_VICTORY: { playerName: 'PLAYER 1', gem: 'amethyst', target: LAST_CELL },
 };
