@@ -9,6 +9,8 @@ import { parseRoomId, parseRoomName, readServerMessage as readLobbyServerMessage
 import type { ServerMessage as LobbyServerMessage } from '../../shared/contracts/casino-entry';
 import { readServerMessage as readDiceServerMessage } from '../../shared/contracts/dice';
 import type { ServerMessage as DiceServerMessage } from '../../shared/contracts/dice';
+import { createGoalBoard } from '../../features/board/model/goal-layout';
+import { nextOpenCell, requiredGemAt } from '../../features/board/model/board-model';
 
 process.env.WRANGLER_LOG_PATH ??= '/tmp/gambler-wrangler-test.log';
 process.env.WRANGLER_SEND_METRICS ??= 'false';
@@ -136,16 +138,39 @@ class DiceRoomClient {
     }
     throw new Error('Timed out waiting for dice welcome');
   }
-  async waitForError() {
+  async waitForStatePhase(phase: 'ready' | 'rolling' | 'confirm' | 'placement' | 'finished', from = 0) {
+    const deadline = Date.now() + 15_000;
+    while (Date.now() < deadline) {
+      const message = this.messages.slice(from).find(item => item.type === 'state' && item.state.phase === phase);
+      if (message?.type === 'state') return message;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw new Error(`Timed out waiting for dice phase ${phase}`);
+  }
+  async waitForError(code?: string, from = 0) {
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
-      const message = this.messages.find(item => item.type === 'error');
+      const message = this.messages.slice(from).find(item => item.type === 'error' && (code === undefined || item.code === code));
       if (message?.type === 'error') return message;
       await new Promise(resolve => setTimeout(resolve, 10));
     }
     throw new Error('Timed out waiting for dice error');
   }
   close() { this.socket.terminate(); }
+}
+
+function firstLegalPlacement(seed: number, results: readonly { id: string; gem: string }[]) {
+  const board = createGoalBoard(seed);
+  for (const [rowIndex, row] of board.rows.entries()) {
+    const cell = nextOpenCell(board, new Set<string>(), row.id);
+    if (!cell) continue;
+    const gem = requiredGemAt(board, cell);
+    const die = results.find(result => result.gem === gem);
+    if (!die) continue;
+    const column = board.columns.findIndex(item => item.id === cell.columnId);
+    if (column >= 0) return { dieId: die.id, row: rowIndex, column };
+  }
+  throw new Error('No legal first placement found for the confirmed roll');
 }
 
 function eventsForRoll(client: ProbeClient, rollId: string) {
@@ -323,9 +348,71 @@ async function verifyRoomAdmission(endpoint: string, pageUrl: URL) {
     assert.equal(diceWelcomeA.state.turnId, fixedPlayers[0]!.id);
     assert.equal(typeof diceWelcomeA.state.boardSeed, 'number');
     assert.deepEqual(diceWelcomeA.state, diceWelcomeB.state);
-    gameDiceA.send({ type: 'roll', requestId: `stage10-${randomUUID()}`, turnSequence: diceWelcomeA.state.turnSequence });
-    const unavailable = await gameDiceA.waitForError();
-    assert.equal(unavailable.code, 'UNAVAILABLE', 'stage 10 connects the game but leaves turn commands for stage 11');
+    const activeId = diceWelcomeA.state.turnId;
+    const activeDice = diceWelcomeA.playerId === activeId ? gameDiceA : gameDiceB;
+    const otherDice = activeDice === gameDiceA ? gameDiceB : gameDiceA;
+    otherDice.send({ type: 'roll', requestId: `out-of-turn-${randomUUID()}`, turnSequence: diceWelcomeA.state.turnSequence });
+    assert.equal((await otherDice.waitForError('TURN')).code, 'TURN', 'non-turn participants cannot start a roll');
+
+    const beforeRollA = gameDiceA.messages.length;
+    const beforeRollB = gameDiceB.messages.length;
+    activeDice.send({ type: 'roll', requestId: `room-roll-${randomUUID()}`, turnSequence: diceWelcomeA.state.turnSequence });
+    const [confirmA, confirmB] = await Promise.all([
+      gameDiceA.waitForStatePhase('confirm', beforeRollA), gameDiceB.waitForStatePhase('confirm', beforeRollB),
+    ]);
+    assert.deepEqual(confirmA.state, confirmB.state);
+    assert.equal(confirmA.roll?.latest.phase, 'settled');
+    assert.equal(confirmA.roll?.results.length, 5);
+    assert.deepEqual(confirmA.roll?.results, confirmB.roll?.results);
+    const diceResults = confirmA.roll?.results ?? [];
+    const rollFramesA = gameDiceA.messages.flatMap(message => message.type === 'frame' && message.frame.rollId === confirmA.roll?.id ? [message] : []);
+    const rollFramesB = gameDiceB.messages.flatMap(message => message.type === 'frame' && message.frame.rollId === confirmA.roll?.id ? [message] : []);
+    const rollingFrames = rollFramesA.filter(message => message.frame.phase === 'rolling');
+    assert.ok(rollingFrames.length > 1);
+    const movingDieId = rollingFrames[0]?.type === 'frame' ? rollingFrames[0].frame.dice[0]?.id : undefined;
+    assert.ok(movingDieId);
+    const firstPosition = rollingFrames[0]?.type === 'frame'
+      ? rollingFrames[0].frame.dice.find(die => die.id === movingDieId)?.p : undefined;
+    assert.ok(rollingFrames.some(message => message.frame.dice.some(die => die.id === movingDieId
+      && JSON.stringify(die.p) !== JSON.stringify(firstPosition))));
+    assert.equal(rollFramesA.at(-1)?.type, 'frame');
+    if (rollFramesA.at(-1)?.type === 'frame') assert.equal(rollFramesA.at(-1)!.frame.phase, 'settled');
+    assert.deepEqual(rollFramesA, rollFramesB, 'both dice sockets receive the same frames');
+    const confirmedRollId = confirmA.roll?.id;
+    if (!confirmedRollId || typeof diceWelcomeA.state.boardSeed !== 'number') throw new Error('Missing roll or board seed');
+    const beforeConfirmA = gameDiceA.messages.length;
+    const beforeConfirmB = gameDiceB.messages.length;
+    activeDice.send({ type: 'confirm', rollId: confirmedRollId });
+    const [placementA, placementB] = await Promise.all([
+      gameDiceA.waitForStatePhase('placement', beforeConfirmA), gameDiceB.waitForStatePhase('placement', beforeConfirmB),
+    ]);
+    assert.deepEqual(placementA.state, placementB.state);
+    const target = firstLegalPlacement(diceWelcomeA.state.boardSeed, diceResults);
+    const beforeStale = activeDice.messages.length;
+    activeDice.send({
+      type: 'place', rollId: confirmedRollId, dieId: target.dieId, row: target.row,
+      column: target.column, revision: placementA.state.revision - 1,
+    });
+    activeDice.send({ type: 'config', config: { count: 5, hz: 120 } });
+    assert.equal((await activeDice.waitForError('CONFIG', beforeStale)).code, 'CONFIG', 'the later command confirms the socket processed the stale placement first');
+    assert.equal(gameDiceA.messages.some(message => message.type === 'state' && message.state.revision > placementA.state.revision), false,
+      'a stale revision cannot place or publish');
+    const beforePlaceA = gameDiceA.messages.length;
+    const beforePlaceB = gameDiceB.messages.length;
+    activeDice.send({
+      type: 'place', rollId: confirmedRollId, dieId: target.dieId, row: target.row,
+      column: target.column, revision: placementA.state.revision,
+    });
+    const [placedA, placedB] = await Promise.all([
+      gameDiceA.waitForStatePhase('placement', beforePlaceA),
+      gameDiceB.waitForStatePhase('placement', beforePlaceB),
+    ]);
+    assert.equal(placedA.state.revision, placementA.state.revision + 1);
+    assert.deepEqual(placedA.state, placedB.state);
+    assert.deepEqual(placedA.match, placedB.match);
+    assert.equal(placedA.state.placements.length, 1);
+    assert.equal(placedA.state.placements[0]?.dieId, target.dieId);
+    assert.equal(placedA.match?.players.find(player => player.id === activeId)?.diceCount, 14);
   } finally {
     playerA.close();
     playerB.close();

@@ -1,15 +1,12 @@
-import RAPIER from '@dimforge/rapier3d';
-// Wrangler compiles this package asset into a WebAssembly.Module.
-import rapierWasm from '@dimforge/rapier3d/rapier_wasm3d_bg.wasm';
-// @ts-expect-error The package does not declare the generated glue subpath.
-import * as rapierGlue from '@dimforge/rapier3d/rapier_wasm3d_bg.js';
 import { CAPTURE_HZ } from '../../../features/dice/model/geometry';
 import { PhysicsRoll } from '../../../features/dice/server/physics';
-import type { PhysicsRuntime } from '../../../features/dice/server/physics';
 import { advanceRoll } from '../../server/core/dice/roll-engine';
 import type { DiceResult, RollKind } from '../../../shared/contracts/dice';
 import { parseRoomName } from '../../../shared/contracts/casino-entry';
-import { GameRoomObject } from '../game-room';
+import { GameRoomObject as GameRoomImplementation } from '../game-room';
+import { initializeCloudflareRapier } from '../rapier-runtime';
+import { createCloudflareRoomRuntime } from '../room-runtime';
+import type { RoomObjectState } from '../game-room';
 
 interface ProbeEnvironment {
   DICE_PROBE_ROOMS: DurableObjectNamespace;
@@ -37,19 +34,6 @@ interface RollCommand {
   readonly ids: readonly string[];
 }
 
-const rapierApi = RAPIER as unknown as PhysicsRuntime;
-const glue = rapierGlue as unknown as { __wbg_set_wasm(exports: WebAssembly.Exports): void };
-let rapierReady: Promise<void> | undefined;
-
-function initializeRapier() {
-  rapierReady ??= Promise.resolve().then(() => {
-    const instance = new WebAssembly.Instance(rapierWasm, {
-      './rapier_wasm3d_bg.js': rapierGlue,
-    });
-    glue.__wbg_set_wasm(instance.exports);
-  });
-  return rapierReady;
-}
 
 function isRollCommand(value: unknown): value is RollCommand {
   if (typeof value !== 'object' || value === null) return false;
@@ -205,8 +189,7 @@ export class DiceProbeRoom {
   }
 
   private async runRoll(command: RollCommand) {
-    await initializeRapier();
-    const physics = new PhysicsRoll({ rollId: command.rollId, kind: command.kind, ids: command.ids, hz: 120 }, rapierApi);
+    const physics = new PhysicsRoll({ rollId: command.rollId, kind: command.kind, ids: command.ids, hz: 120 }, initializeCloudflareRapier());
     let accumulatorMs = 0;
     let lastTick = Date.now();
     const startedAt = lastTick;
@@ -243,4 +226,8 @@ export class DiceProbeRoom {
   }
 }
 
-export { GameRoomObject };
+export class GameRoomObject extends GameRoomImplementation {
+  constructor(state: RoomObjectState) {
+    super(state, createCloudflareRoomRuntime(initializeCloudflareRapier));
+  }
+}

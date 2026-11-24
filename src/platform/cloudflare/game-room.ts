@@ -4,6 +4,7 @@ import { parseRoomName } from '../../shared/contracts/casino-entry';
 import { readClientMessage as readDiceMessage } from '../../shared/contracts/dice';
 import type { ClientMessage as DiceClientMessage, ServerMessage as DiceServerMessage } from '../../shared/contracts/dice';
 import { Room } from '../server/core/room';
+import type { RoomRuntime } from '../server/core/ports';
 import type { DicePeer, LobbyPeer } from '../server/core/room';
 import { createCloudflareRoomRuntime } from './room-runtime';
 
@@ -12,7 +13,7 @@ interface RoomStorage {
   put(key: string, value: unknown): Promise<void>;
 }
 
-interface RoomObjectState {
+export interface RoomObjectState {
   storage: RoomStorage;
   blockConcurrencyWhile(callback: () => Promise<void>): Promise<void>;
 }
@@ -59,11 +60,12 @@ function isSameOrigin(request: Request) {
 export class GameRoomObject {
   private roomInfo: CasinoRoomInfo | null = null;
   private room: Room | null = null;
-  private readonly runtime = createCloudflareRoomRuntime();
+  private readonly runtime: RoomRuntime;
   private readonly connections = new Set<WebSocket>();
   private readonly ready: Promise<void>;
 
-  constructor(private readonly state: RoomObjectState) {
+  constructor(private readonly state: RoomObjectState, runtime = createCloudflareRoomRuntime()) {
+    this.runtime = runtime;
     this.ready = state.blockConcurrencyWhile(async () => {
       const saved = roomInfo(await state.storage.get<unknown>('room'));
       if (!saved) return;
@@ -222,7 +224,8 @@ export class GameRoomObject {
       if (!context.id) context.socket.close(1008, 'join rejected');
       return;
     }
-    this.send(context.socket, { type: 'error', code: 'UNAVAILABLE', message: 'STGでは現在、対戦の開始まで確認できます。' });
+    if (message.type === 'join') return;
+    room.commandDice(context.id, context.peer, message);
   }
 
   private onClose(context: Connection) {
