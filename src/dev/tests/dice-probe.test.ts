@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { test } from 'node:test';
 import { WebSocket } from 'ws';
@@ -18,7 +19,12 @@ const unstableDev = require('wrangler').unstable_dev as (
 interface ProbeEvent {
   readonly type: string;
   readonly rollId?: string;
-  readonly frame?: { readonly rollId: string; readonly phase: string; readonly seq: number };
+  readonly frame?: {
+    readonly rollId: string;
+    readonly phase: string;
+    readonly seq: number;
+    readonly dice: readonly { readonly id: string; readonly p: readonly number[]; readonly stopped: boolean }[];
+  };
   readonly results?: readonly { readonly id: string; readonly gem: string }[];
   readonly metrics?: { readonly elapsedMs: number; readonly steps: number; readonly frames: number };
 }
@@ -27,8 +33,10 @@ class ProbeClient {
   readonly socket: WebSocket;
   readonly events: ProbeEvent[] = [];
 
-  constructor(port: number, room: string) {
-    this.socket = new WebSocket(`ws://127.0.0.1:${port}/dice-probe?room=${room}`);
+  constructor(endpoint: string, room: string) {
+    const url = new URL(endpoint);
+    url.searchParams.set('room', room);
+    this.socket = new WebSocket(url);
     this.socket.on('message', data => this.events.push(JSON.parse(data.toString()) as ProbeEvent));
   }
 
@@ -77,63 +85,125 @@ function assertReceivedResult(event: ProbeEvent, expectedIds: readonly string[])
   assert.ok(metrics?.frames && metrics.frames > 1);
 }
 
-test('STG dice probe streams matching physics frames and results to two clients in separate rooms', { timeout: 45_000 }, async () => {
-  const worker = await unstableDev('src/platform/cloudflare/dice-probe/worker.ts', {
-    config: 'wrangler.jsonc',
-    env: 'stg',
-    ip: '127.0.0.1',
-    port: 0,
-    local: true,
-    inspect: false,
-    persist: false,
-    logLevel: 'error',
+function assertMotionFrames(frames: readonly ProbeEvent[]) {
+  const rollingFrames = frames.flatMap(event => event.frame?.phase === 'rolling' ? [event.frame] : []);
+  assert.ok(rollingFrames.length > 1, 'the roll includes intermediate motion frames');
+  const dieId = rollingFrames[0]!.dice[0]?.id;
+  assert.ok(dieId, 'rolling frames include a die');
+  const positions = rollingFrames.flatMap(frame => {
+    const die = frame.dice.find(item => item.id === dieId);
+    return die ? [die.p] : [];
   });
+  assert.ok(positions.length > 1 && positions.some(position => JSON.stringify(position) !== JSON.stringify(positions[0])), 'the same die changes position during the roll');
+  const last = frames.at(-1)?.frame;
+  assert.equal(last?.phase, 'settled');
+  assert.ok(last?.dice.length && last.dice.every(die => die.stopped), 'the final frame shows every die stopped');
+}
+
+test('STG dice probe streams matching physics frames and results to two clients in separate rooms', { timeout: 45_000 }, async () => {
+  const stgEndpoint = process.env.STG_DICE_PROBE_URL?.trim() || undefined;
+  if (stgEndpoint) {
+    const url = new URL(stgEndpoint);
+    assert.equal(url.protocol, 'wss:', 'STG_DICE_PROBE_URL must use secure WebSockets');
+    assert.equal(url.username, '', 'Do not put credentials in the URL');
+    assert.equal(url.password, '', 'Do not put credentials in the URL');
+    assert.equal(url.pathname, '/dice-probe');
+    assert.equal(url.search, '', 'The test supplies a unique room name');
+    assert.equal(url.hash, '');
+  }
+  const worker = stgEndpoint ? undefined : await unstableDev('src/platform/cloudflare/dice-probe/worker.ts', {
+    config: 'wrangler.jsonc', env: 'stg', ip: '127.0.0.1', port: 0,
+    local: true, inspect: false, persist: false, logLevel: 'error',
+  });
+  const endpoint = stgEndpoint ?? `ws://127.0.0.1:${worker!.port}/dice-probe`;
+  const runId = `probe-${randomUUID().replaceAll('-', '')}`;
+  const roomA = `${runId}-a`;
+  const roomB = `${runId}-b`;
+  const aInitial = `a-initial-${runId}`;
+  const bInitial = `b-initial-${runId}`;
+  const aReroll = `a-reroll-${runId}`;
+  const bSecond = `b-second-${runId}`;
   const clients = [
-    new ProbeClient(worker.port, 'probe-a'), new ProbeClient(worker.port, 'probe-a'),
-    new ProbeClient(worker.port, 'probe-b'), new ProbeClient(worker.port, 'probe-b'),
+    new ProbeClient(endpoint, roomA), new ProbeClient(endpoint, roomA),
+    new ProbeClient(endpoint, roomB), new ProbeClient(endpoint, roomB),
   ];
   try {
     await Promise.all(clients.map(client => client.open()));
-    clients[0]!.send('a-initial', 'initial', ['a1', 'a2', 'a3', 'a4', 'a5']);
-    clients[2]!.send('b-initial', 'initial', ['b1', 'b2', 'b3', 'b4', 'b5']);
-    const firstWave = await Promise.all([
-      clients[0]!.waitFor('finished', 'a-initial'), clients[1]!.waitFor('finished', 'a-initial'),
-      clients[2]!.waitFor('finished', 'b-initial'), clients[3]!.waitFor('finished', 'b-initial'),
+    const baselineStarted = performance.now();
+    clients[0]!.send(aInitial, 'initial', ['a1', 'a2', 'a3', 'a4', 'a5']);
+    const baseline = await Promise.all([
+      clients[0]!.waitFor('finished', aInitial), clients[1]!.waitFor('finished', aInitial),
     ]);
+    const baselineClientMs = Math.round(performance.now() - baselineStarted);
+    const baselineFrames = eventsForRoll(clients[0]!, aInitial).filter(event => event.type === 'frame');
+    assert.deepEqual(baselineFrames, eventsForRoll(clients[1]!, aInitial).filter(event => event.type === 'frame'));
+    assertMotionFrames(baselineFrames);
+    assert.deepEqual(baseline[0]!.results, baseline[1]!.results);
+    assertReceivedResult(baseline[0]!, ['a1', 'a2', 'a3', 'a4', 'a5']);
+    assert.equal(eventsForRoll(clients[2]!, aInitial).length, 0);
+    assert.equal(eventsForRoll(clients[3]!, aInitial).length, 0);
 
-    for (const [left, right, rollId] of [[clients[0]!, clients[1]!, 'a-initial'], [clients[2]!, clients[3]!, 'b-initial']] as const) {
+    const firstWaveStarted = performance.now();
+    clients[0]!.send(aReroll, 'reroll', ['a1', 'a2', 'a3', 'a4', 'a5']);
+    clients[2]!.send(bInitial, 'initial', ['b1', 'b2', 'b3', 'b4', 'b5']);
+    const firstWave = await Promise.all([
+      clients[0]!.waitFor('finished', aReroll), clients[1]!.waitFor('finished', aReroll),
+      clients[2]!.waitFor('finished', bInitial), clients[3]!.waitFor('finished', bInitial),
+    ]);
+    const firstWaveClientMs = Math.round(performance.now() - firstWaveStarted);
+
+    for (const [left, right, rollId] of [[clients[0]!, clients[1]!, aReroll], [clients[2]!, clients[3]!, bInitial]] as const) {
       const leftFrames = eventsForRoll(left, rollId).filter(event => event.type === 'frame');
       const rightFrames = eventsForRoll(right, rollId).filter(event => event.type === 'frame');
       assert.deepEqual(leftFrames, rightFrames);
-      assert.ok(leftFrames.length > 1, 'clients receive intermediate and final frames');
-      assert.equal(leftFrames.at(-1)?.frame?.phase, 'settled');
+      assertMotionFrames(leftFrames);
     }
     assert.deepEqual(firstWave[0]!.results, firstWave[1]!.results);
     assert.deepEqual(firstWave[2]!.results, firstWave[3]!.results);
     assertReceivedResult(firstWave[0]!, ['a1', 'a2', 'a3', 'a4', 'a5']);
     assertReceivedResult(firstWave[2]!, ['b1', 'b2', 'b3', 'b4', 'b5']);
     assert.ok(firstWave[0]!.metrics?.elapsedMs && firstWave[0]!.metrics!.elapsedMs > 0);
+    assert.equal(eventsForRoll(clients[1]!, bInitial).length, 0);
+    assert.equal(eventsForRoll(clients[3]!, aReroll).length, 0);
 
-    clients[0]!.send('a-reroll', 'reroll', ['a1', 'a2', 'a3', 'a4', 'a5']);
-    clients[2]!.send('b-second', 'initial', ['b6', 'b7', 'b8', 'b9', 'b10']);
+    const secondWaveStarted = performance.now();
+    const aSecondReroll = `a-reroll-2-${runId}`;
+    clients[0]!.send(aSecondReroll, 'reroll', ['a1', 'a2', 'a3', 'a4', 'a5']);
+    clients[2]!.send(bSecond, 'reroll', ['b1', 'b2', 'b3', 'b4', 'b5']);
     const secondWave = await Promise.all([
-      clients[0]!.waitFor('finished', 'a-reroll'), clients[1]!.waitFor('finished', 'a-reroll'),
-      clients[2]!.waitFor('finished', 'b-second'), clients[3]!.waitFor('finished', 'b-second'),
+      clients[0]!.waitFor('finished', aSecondReroll), clients[1]!.waitFor('finished', aSecondReroll),
+      clients[2]!.waitFor('finished', bSecond), clients[3]!.waitFor('finished', bSecond),
     ]);
+    const secondWaveClientMs = Math.round(performance.now() - secondWaveStarted);
     assert.deepEqual(secondWave[0]!.results, secondWave[1]!.results);
     assert.deepEqual(secondWave[2]!.results, secondWave[3]!.results);
     assertReceivedResult(secondWave[0]!, ['a1', 'a2', 'a3', 'a4', 'a5']);
-    assertReceivedResult(secondWave[2]!, ['b6', 'b7', 'b8', 'b9', 'b10']);
-    for (const [left, right, rollId] of [[clients[0]!, clients[1]!, 'a-reroll'], [clients[2]!, clients[3]!, 'b-second']] as const) {
+    assertReceivedResult(secondWave[2]!, ['b1', 'b2', 'b3', 'b4', 'b5']);
+    for (const [left, right, rollId] of [[clients[0]!, clients[1]!, aSecondReroll], [clients[2]!, clients[3]!, bSecond]] as const) {
       const leftFrames = eventsForRoll(left, rollId).filter(event => event.type === 'frame');
       const rightFrames = eventsForRoll(right, rollId).filter(event => event.type === 'frame');
       assert.deepEqual(leftFrames, rightFrames);
-      assert.equal(leftFrames.at(-1)?.frame?.phase, 'settled');
+      assertMotionFrames(leftFrames);
     }
-    assert.equal(eventsForRoll(clients[1]!, 'b-second').length, 0);
-    assert.equal(eventsForRoll(clients[3]!, 'a-reroll').length, 0);
+    assert.equal(eventsForRoll(clients[1]!, bSecond).length, 0);
+    assert.equal(eventsForRoll(clients[3]!, aSecondReroll).length, 0);
+    if (stgEndpoint) {
+      console.log(JSON.stringify({
+        stgProbe: true,
+        rooms: 2,
+        clientsPerRoom: 2,
+        concurrentRolls: [
+          { kind: 'initial', metrics: baseline[0]!.metrics },
+          { kind: 'reroll', metrics: firstWave[0]!.metrics },
+          { kind: 'initial', metrics: firstWave[2]!.metrics },
+          { kind: 'reroll', metrics: secondWave[0]!.metrics },
+          { kind: 'reroll', metrics: secondWave[2]!.metrics },
+        ],
+        clientMs: { baseline: baselineClientMs, firstWave: firstWaveClientMs, secondWave: secondWaveClientMs },
+      }));
+    }
   } finally {
     await Promise.all(clients.map(client => client.close()));
-    await worker.stop();
+    await worker?.stop();
   }
 });
