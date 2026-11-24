@@ -1,13 +1,24 @@
-import RAPIER from '@dimforge/rapier3d-compat';
+import type RAPIER from '@dimforge/rapier3d-compat';
 import type { RigidBody, World, EventQueue } from '@dimforge/rapier3d-compat';
 import { DIE_BEVEL, DIE_SIZE, TRAY, releaseAt, upperFace } from '../model/geometry';
 import type { Quaternion, Vec3 } from '../model/geometry';
 import type { DiceHz, DiceResult, DiePose, Frame, Impact, RollKind } from '../../../shared/contracts/dice';
 
+export type PhysicsRuntime = typeof RAPIER;
 let ready: Promise<void> | undefined;
-export function initPhysics() {
-  ready ??= RAPIER.init();
+let rapierApi: PhysicsRuntime | undefined;
+
+export async function initPhysics() {
+  const runtime = (await import('@dimforge/rapier3d-compat')).default;
+  if (rapierApi && rapierApi !== runtime) throw new Error('Physics is already initialized with a different Rapier API');
+  rapierApi = runtime;
+  ready ??= runtime.init();
   return ready;
+}
+
+function requireRapier() {
+  if (!rapierApi) throw new Error('Call initPhysics before creating a roll');
+  return rapierApi;
 }
 
 const THROW_SPACING = 46;
@@ -84,20 +95,22 @@ export class PhysicsRoll {
   private stepIndex = 0;
   private sequence = 0;
   private disposed = false;
+  private readonly rapier: PhysicsRuntime;
   private readonly random: () => number;
   private finished: readonly DiceResult[] = [];
   private hitDeadline = false;
   private nudges = 0;
 
-  constructor(private readonly options: Options) {
+  constructor(private readonly options: Options, rapier: PhysicsRuntime = requireRapier()) {
+    this.rapier = rapier;
     this.dt = 1 / options.hz;
     this.releaseMs = releaseAt(options.kind);
     this.random = options.random ?? Math.random;
-    this.world = new RAPIER.World({ x: 0, y: -19.8, z: 0 });
+    this.world = new this.rapier.World({ x: 0, y: -19.8, z: 0 });
     this.world.timestep = this.dt;
     this.world.numSolverIterations = 8;
     this.world.maxCcdSubsteps = 4;
-    this.events = new RAPIER.EventQueue(true);
+    this.events = new this.rapier.EventQueue(true);
     const { width, depth, floor, wall, wallHeight } = TRAY;
     this.createSurface([width, floor, depth], [0, -floor / 2, 0], 'floor');
     for (const sign of [-1, 1]) {
@@ -114,7 +127,7 @@ export class PhysicsRoll {
   get settled() { return this.finished.length > 0; }
 
   private createSurface([width, height, depth]: Vec3, [x, y, z]: Vec3, kind: 'floor' | 'wall') {
-    const collider = this.world.createCollider(RAPIER.ColliderDesc.cuboid(width / 2, height / 2, depth / 2)
+    const collider = this.world.createCollider(this.rapier.ColliderDesc.cuboid(width / 2, height / 2, depth / 2)
       .setTranslation(x, y, z)
       .setFriction(kind === 'floor' ? .59 : .48)
       .setRestitution(kind === 'floor' ? .20 : .28));
@@ -126,15 +139,15 @@ export class PhysicsRoll {
     const [x, y, z, w] = initial.rotation;
     const [px, py, pz] = initial.position;
     const [vx, vy, vz] = initial.velocity;
-    const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic()
+    const body = this.world.createRigidBody(this.rapier.RigidBodyDesc.dynamic()
       .setTranslation(px, py, pz).setRotation({ x, y, z, w })
       .setLinvel(vx, vy, vz).setAngvel(components(initial.spin))
       .setLinearDamping(.48).setAngularDamping(.46)
       .setCanSleep(true).setCcdEnabled(true));
     const inner = DIE_SIZE / 2 - DIE_BEVEL;
-    this.world.createCollider(RAPIER.ColliderDesc.roundCuboid(inner, inner, inner, DIE_BEVEL)
+    this.world.createCollider(this.rapier.ColliderDesc.roundCuboid(inner, inner, inner, DIE_BEVEL)
       .setDensity(1.06).setFriction(.54).setRestitution(.23)
-      .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS).setContactForceEventThreshold(23), body);
+      .setActiveEvents(this.rapier.ActiveEvents.CONTACT_FORCE_EVENTS).setContactForceEventThreshold(23), body);
     this.dice.push({ id, body, quiet: 0, nudges: 0 });
   }
 
