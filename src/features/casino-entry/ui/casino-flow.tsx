@@ -56,7 +56,7 @@ function SeatTile({ seat, slot, playerId, hostId }: {
   </div>;
 }
 
-function CountdownChip({ deadline, offset, exiting }: { deadline: number; offset: number; exiting: boolean }) {
+function CountdownChip({ deadline, offset }: { deadline: number; offset: number }) {
   const countAt = () => Math.max(1, Math.min(countdownSteps, Math.ceil((deadline - Date.now() - offset) / 1000)));
   const [count, setCount] = useState(countAt);
   useEffect(() => {
@@ -65,20 +65,21 @@ function CountdownChip({ deadline, offset, exiting }: { deadline: number; offset
     const interval = window.setInterval(refresh, 40);
     return () => window.clearInterval(interval);
   }, [deadline, offset]);
-  return <div className="countdown-disc" data-exiting={exiting}>
+  return <div className="countdown-disc">
     <div className="countdown-chip" key={count} data-count={count} role="status" aria-label={`開始まで ${count}`}>
       <span>{count}</span>
     </div>
   </div>;
 }
 
-function VipLobby({ info, room, setReady, leave, blocked, deadline }: {
+function VipLobby({ info, room, setReady, leave, blocked, deadline, enteringGame }: {
   info: ConnectionView;
   room: CasinoRoomInfo;
   setReady: (ready: boolean) => void;
   leave: () => void;
   blocked: boolean;
   deadline: number | null;
+  enteringGame: boolean;
 }) {
   const { lobby, playerId, status, problem, clockOffset } = info;
   const title = useRef<HTMLHeadingElement>(null);
@@ -86,7 +87,9 @@ function VipLobby({ info, room, setReady, leave, blocked, deadline }: {
   const ready = joined.filter(seat => seat.ready).length;
   const mine = joined.find(seat => seat.id === playerId);
   const message = problem || (status !== 'online' ? status === 'connecting' ? 'ルームに接続しています' : 'ルームへの再接続を待っています'
-    : joined.length < MIN_PLAYERS ? 'もうひとりの参加を待っています'
+    : enteringGame ? '対戦を読み込んでいます…'
+      : lobby?.phase === 'started' ? 'このルームの対戦はすでに始まっています'
+      : joined.length < MIN_PLAYERS ? 'もうひとりの参加を待っています'
       : deadline ? 'まもなくゲームが始まります' : '全員の準備が揃うとゲームが始まります');
 
   useEffect(() => { if (!blocked) title.current?.focus({ preventScroll: true }); }, [blocked]);
@@ -94,7 +97,7 @@ function VipLobby({ info, room, setReady, leave, blocked, deadline }: {
   return <main className="vip-lobby" id="vip-lobby" inert={blocked}>
     <div className="vip-panel">
       <header className="vip-heading">
-        <button className="casino-plain vip-exit" id="leave-lobby" onClick={leave}>退出</button>
+        <button className="casino-plain vip-exit" id="leave-lobby" disabled={enteringGame} onClick={leave}>退出</button>
         <div className="vip-title">
           <Crest className="vip-crown" />
           <h1 ref={title} tabIndex={-1}>VIP LOUNGE</h1>
@@ -106,7 +109,7 @@ function VipLobby({ info, room, setReady, leave, blocked, deadline }: {
         <div className="vip-table">
           <div className="vip-felt">
             {deadline !== null
-              ? <CountdownChip key={deadline} deadline={deadline} offset={clockOffset} exiting={lobby?.phase === 'started'} />
+              ? <CountdownChip key={deadline} deadline={deadline} offset={clockOffset} />
               : <div className="vip-table-mark"><Crest className="table-crown" /><span>GAMBLER</span></div>}
           </div>
         </div>
@@ -130,28 +133,6 @@ function RoomIdentity({ room }: { room: CasinoRoomInfo }) {
   </div>;
 }
 
-function CasinoStarted({ room, players, playerId, leave, blocked }: { room: CasinoRoomInfo; players: readonly Seat[]; playerId: string | null; leave: () => void; blocked: boolean }) {
-  const title = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { if (!blocked) title.current?.focus({ preventScroll: true }); }, [blocked]);
-  return <main className="vip-lobby" id="casino-started" inert={blocked}>
-    <section className="vip-panel vip-completion">
-      <div className="vip-title">
-        <Crest className="vip-crown" />
-        <h1 ref={title} tabIndex={-1}>ゲーム開始</h1>
-        <RoomIdentity room={room} />
-      </div>
-      <ol className="casino-start-order" aria-label="開始時の座席順">
-        {players.map((player, index) => <li key={player.id}>
-          <span>{String(index + 1).padStart(2, '0')}</span>{player.name}
-        </li>)}
-      </ol>
-      {playerId && players.some(player => player.id === playerId) &&
-        <a className="casino-plain" href={`/?game=dice&room=${encodeURIComponent(room.id)}`}>対戦へ進む</a>}
-      <button className="casino-plain" type="button" onClick={leave}>退出</button>
-    </section>
-  </main>;
-}
-
 export function CasinoFlow({ connection, audio, invitedRoom, onRoomChanged }: {
   connection: CasinoRoomTransport;
   audio: CasinoSound;
@@ -166,13 +147,15 @@ export function CasinoFlow({ connection, audio, invitedRoom, onRoomChanged }: {
   const [roomProblem, setRoomProblem] = useState<RoomProblem | null>(null);
   const [roomPending, setRoomPending] = useState<RoomAction | null>(null);
   const [departing, setDeparting] = useState<ConnectionView | null>(null);
-  const [holdDeadline, setHoldDeadline] = useState<number | null>(null);
-  const [showCompletion, setShowCompletion] = useState(false);
   const sceneRef = useRef<Scene>('LOADING');
+  const enteringRoom = useRef<string | null>(null);
   const alive = useRef(false);
   const loaderBusy = useRef(false);
   const retryButton = useRef<HTMLButtonElement>(null);
-  const gameStarted = info.lobby?.phase === 'started';
+  const entered = scene === 'ENTERED';
+  const gameRoomId = info.status === 'online' && info.lobby?.phase === 'started'
+    && info.lobby.startedPlayers?.some(player => player.id === info.playerId) ? info.room?.id : undefined;
+  const enteringGame = entered && gameRoomId !== undefined;
   const deadline = info.status === 'online' && info.lobby?.phase === 'countdown' ? info.lobby.startAt : null;
 
   function moveTo(next: Scene) {
@@ -203,16 +186,10 @@ export function CasinoFlow({ connection, audio, invitedRoom, onRoomChanged }: {
   }, [scene, audio]);
 
   useEffect(() => {
-    if (!gameStarted) {
-      setShowCompletion(false);
-      setHoldDeadline(deadline);
-      return;
-    }
-    const finish = () => setShowCompletion(true);
-    if (holdDeadline === null || reducedMotion()) { finish(); return; }
-    const timeout = window.setTimeout(finish, 210);
-    return () => window.clearTimeout(timeout);
-  }, [deadline, gameStarted, holdDeadline]);
+    if (!entered || !gameRoomId || enteringRoom.current === gameRoomId) return;
+    enteringRoom.current = gameRoomId;
+    window.location.replace(`/?game=dice&room=${encodeURIComponent(gameRoomId)}`);
+  }, [entered, gameRoomId]);
 
   function load() {
     if (loaderBusy.current) return;
@@ -291,26 +268,20 @@ export function CasinoFlow({ connection, audio, invitedRoom, onRoomChanged }: {
     onRoomChanged?.(null);
     audio.cut();
     audio.playClose();
-    setShowCompletion(false);
-    setHoldDeadline(null);
   }
 
   const opening = scene === 'DOOR_OPENING';
-  const entered = scene === 'ENTERED';
   const motion = scene === 'ROOM_UNLOCKING' ? 'unlocking' : scene === 'ROOM_OPENING' ? 'opening' : scene === 'ROOM_CLOSING' ? 'closing' : null;
   const roomView = motion === 'closing' ? departing : info;
   const showLobby = Boolean(roomView?.room && (entered || motion));
-  const finished = Boolean(roomView?.lobby?.phase === 'started' && (showCompletion || motion === 'closing'));
-  const phase: CasinoPhase = entered ? showCompletion ? 'IN_GAME' : deadline || gameStarted ? 'COUNTDOWN' : 'LOBBY_WAITING' : scene;
+  const phase: CasinoPhase = entered ? enteringGame ? 'IN_GAME' : deadline !== null ? 'COUNTDOWN' : 'LOBBY_WAITING' : scene;
   const percent = Math.floor(progress.loaded * 100 / progress.total);
 
   return <div className="casino-flow" data-phase={phase}>
     {(opening || scene === 'ROOM_SELECT' || scene === 'ROOM_CONNECTING') &&
       <RoomChooser invitedRoom={invitedRoom} pending={roomPending} problem={roomProblem} blocked={opening} submit={openRoom} />}
-    {showLobby && roomView?.room && (finished
-      ? <CasinoStarted room={roomView.room} players={roomView.lobby?.startedPlayers ?? []} playerId={info.playerId} leave={leave} blocked={!entered} />
-      : <VipLobby info={roomView} room={roomView.room} setReady={ready => connection.setReady(ready)}
-          leave={leave} blocked={!entered} deadline={gameStarted ? holdDeadline : deadline} />)}
+    {showLobby && roomView?.room && <VipLobby info={roomView} room={roomView.room} setReady={ready => connection.setReady(ready)}
+      leave={leave} blocked={!entered} deadline={deadline} enteringGame={enteringGame} />}
     {motion && <RoomDoor motion={motion} onComplete={finishDoor} />}
     {(opening || scene === 'LOADING' || scene === 'LOAD_ERROR' || scene === 'RESTORING' || scene === 'READY_TO_ENTER') &&
       <main className="casino-entrance" id="casino-entrance" data-opening={opening} inert={opening}>
