@@ -1,0 +1,11 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "compatibility_date": "2026-11-24",
+  "env": {
+    "stg": {
+      "name": "gambler-stg",
+      "workers_dev": false,
+      "preview_urls": false
+    }
+  }
+}
