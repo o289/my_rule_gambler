@@ -11,6 +11,7 @@ import type { DiceResult, RollKind } from '../../../shared/contracts/dice';
 
 interface ProbeEnvironment {
   DICE_PROBE_ROOMS: DurableObjectNamespace;
+  ASSETS: { fetch(request: Request): Promise<Response> };
 }
 
 interface DurableObjectNamespace {
@@ -68,7 +69,9 @@ function delay(ms: number) {
 export default {
   async fetch(request: Request, env: ProbeEnvironment): Promise<Response> {
     const url = new URL(request.url);
-    if (url.pathname !== '/dice-probe') return new Response('Not found', { status: 404 });
+    if (url.searchParams.has('preview')) return new Response('Not found', { status: 404 });
+    if (url.pathname === '/casino-ws' || url.pathname === '/dice-ws') return new Response('Not found', { status: 404 });
+    if (url.pathname !== '/dice-probe') return env.ASSETS.fetch(request);
     const roomName = url.searchParams.get('room');
     if (!roomName || !/^[a-zA-Z0-9_-]{1,64}$/.test(roomName)) return new Response('Invalid room', { status: 400 });
     const id = env.DICE_PROBE_ROOMS.idFromName(roomName);

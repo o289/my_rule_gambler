@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -128,6 +129,33 @@ test('STG dice probe streams matching physics frames and results to two clients 
     new ProbeClient(endpoint, roomB), new ProbeClient(endpoint, roomB),
   ];
   try {
+    const pageUrl = new URL(endpoint);
+    pageUrl.protocol = pageUrl.protocol === 'wss:' ? 'https:' : 'http:';
+    pageUrl.pathname = '/';
+    pageUrl.search = '';
+    const navigationHeaders = { headers: { 'Sec-Fetch-Mode': 'navigate' } };
+    const page = await fetch(pageUrl, navigationHeaders);
+    assert.equal(page.status, 200);
+    const pageHtml = await page.text();
+    assert.match(pageHtml, /id="root"/);
+    const scriptPath = pageHtml.match(/src="([^"]+\.js)"/)?.[1];
+    assert.ok(scriptPath, 'the page references a built JavaScript asset');
+    const scriptUrl = new URL(scriptPath, pageUrl);
+    assert.equal((await fetch(scriptUrl)).status, 200);
+    for (const preview of ['list', 'result', 'effects']) {
+      const previewUrl = new URL(pageUrl);
+      previewUrl.searchParams.set('preview', preview);
+      assert.equal((await fetch(previewUrl, navigationHeaders)).status, 404);
+    }
+    const spaUrl = new URL('/game/stg-route', pageUrl);
+    assert.equal((await fetch(spaUrl, navigationHeaders)).status, 200);
+    assert.equal((await fetch(new URL('/casino-ws', pageUrl))).status, 404);
+    assert.equal((await fetch(new URL('/dice-ws', pageUrl))).status, 404);
+    if (worker) {
+      const assets = readdirSync('dist-stg/assets');
+      assert.equal(assets.some(name => /(?:Board|Effects|Players|Bank|Result)Preview/.test(name)), false,
+        'STG build omits standalone preview chunks');
+    }
     await Promise.all(clients.map(client => client.open()));
     const baselineStarted = performance.now();
     clients[0]!.send(aInitial, 'initial', ['a1', 'a2', 'a3', 'a4', 'a5']);
