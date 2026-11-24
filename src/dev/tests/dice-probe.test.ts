@@ -7,6 +7,8 @@ import { test } from 'node:test';
 import { WebSocket } from 'ws';
 import { parseRoomId, parseRoomName, readServerMessage as readLobbyServerMessage } from '../../shared/contracts/casino-entry';
 import type { ServerMessage as LobbyServerMessage } from '../../shared/contracts/casino-entry';
+import { readServerMessage as readDiceServerMessage } from '../../shared/contracts/dice';
+import type { ServerMessage as DiceServerMessage } from '../../shared/contracts/dice';
 
 process.env.WRANGLER_LOG_PATH ??= '/tmp/gambler-wrangler-test.log';
 process.env.WRANGLER_SEND_METRICS ??= 'false';
@@ -92,14 +94,56 @@ class LobbyClient {
 
   async open() { await once(this.socket, 'open'); }
   send(value: unknown) { this.socket.send(JSON.stringify(value)); }
-  async waitFor(type: LobbyServerMessage['type']) {
+  private async waitUntil(predicate: (message: LobbyServerMessage) => boolean, from = 0) {
     const deadline = Date.now() + 10_000;
     while (Date.now() < deadline) {
-      const message = this.messages.find(item => item.type === type);
+      const message = this.messages.slice(from).find(predicate);
       if (message) return message;
       await new Promise(resolve => setTimeout(resolve, 10));
     }
-    throw new Error(`Timed out waiting for ${type}`);
+    throw new Error('Timed out waiting for lobby message');
+  }
+  waitFor(type: LobbyServerMessage['type']) { return this.waitUntil(item => item.type === type); }
+  async waitForPhase(phase: 'waiting' | 'countdown' | 'started', from = 0) {
+    const message = await this.waitUntil(item => item.type === 'state' && item.state.phase === phase, from);
+    if (message.type !== 'state') throw new Error(`Expected lobby phase ${phase}`);
+    return message;
+  }
+  close() { this.socket.terminate(); }
+}
+
+class DiceRoomClient {
+  readonly socket: WebSocket;
+  readonly messages: DiceServerMessage[] = [];
+
+  constructor(endpoint: string, room: string) {
+    const url = new URL(endpoint);
+    url.searchParams.set('room', room);
+    this.socket = new WebSocket(url);
+    this.socket.on('message', data => {
+      const message = readDiceServerMessage(JSON.parse(data.toString()));
+      if (message) this.messages.push(message);
+    });
+  }
+  async open() { await once(this.socket, 'open'); }
+  send(value: unknown) { this.socket.send(JSON.stringify(value)); }
+  async waitForWelcome() {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const message = this.messages.find(item => item.type === 'welcome');
+      if (message?.type === 'welcome') return message;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw new Error('Timed out waiting for dice welcome');
+  }
+  async waitForError() {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const message = this.messages.find(item => item.type === 'error');
+      if (message?.type === 'error') return message;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw new Error('Timed out waiting for dice error');
   }
   close() { this.socket.terminate(); }
 }
@@ -175,6 +219,10 @@ async function verifyRoomAdmission(endpoint: string, pageUrl: URL) {
   const playerB = new LobbyClient(lobbyBase.toString(), roomB.id);
   let dice: WebSocket | null = null;
   let replacement: LobbyClient | null = null;
+  let gameRoomPlayerA: LobbyClient | null = null;
+  let gameRoomPlayerB: LobbyClient | null = null;
+  let gameDiceA: DiceRoomClient | null = null;
+  let gameDiceB: DiceRoomClient | null = null;
   try {
     await Promise.all([playerA.open(), playerB.open()]);
     playerA.send({ type: 'join', room: roomA.id });
@@ -219,10 +267,73 @@ async function verifyRoomAdmission(endpoint: string, pageUrl: URL) {
     const replacementValue = await replacement.waitFor('welcome');
     if (replacementValue.type !== 'welcome') throw new Error('Expected replacement welcome');
     assert.equal(replacementValue.state.seats.length, 1);
+
+    const gameRoom = await create(`stg-${randomUUID().slice(0, 8)}-ready`);
+    gameRoomPlayerA = new LobbyClient(lobbyBase.toString(), gameRoom.id);
+    gameRoomPlayerB = new LobbyClient(lobbyBase.toString(), gameRoom.id);
+    await Promise.all([gameRoomPlayerA.open(), gameRoomPlayerB.open()]);
+    gameRoomPlayerA.send({ type: 'join', room: gameRoom.id });
+    gameRoomPlayerB.send({ type: 'join', room: gameRoom.id });
+    const [gameWelcomeA, gameWelcomeB] = await Promise.all([
+      gameRoomPlayerA.waitFor('welcome'), gameRoomPlayerB.waitFor('welcome'),
+    ]);
+    if (gameWelcomeA.type !== 'welcome' || gameWelcomeB.type !== 'welcome') throw new Error('Expected game room welcomes');
+    gameRoomPlayerA.send({ type: 'ready', ready: true });
+    gameRoomPlayerB.send({ type: 'ready', ready: true });
+    const countdown = await gameRoomPlayerA.waitForPhase('countdown');
+    assert.ok(countdown.state.startAt !== null);
+    const countdownB = await gameRoomPlayerB.waitForPhase('countdown');
+    assert.equal(countdownB.state.startAt, countdown.state.startAt, 'both players share the countdown deadline');
+    const beforeCancelA = gameRoomPlayerA.messages.length;
+    const beforeCancelB = gameRoomPlayerB.messages.length;
+    gameRoomPlayerA.send({ type: 'ready', ready: false });
+    const cancelled = await gameRoomPlayerA.waitForPhase('waiting', beforeCancelA);
+    const cancelledB = await gameRoomPlayerB.waitForPhase('waiting', beforeCancelB);
+    assert.equal(cancelled.state.startAt, null, 'cancelling READY returns the shared room to waiting');
+    assert.equal(cancelledB.state.startAt, null);
+    const beforeRestartA = gameRoomPlayerA.messages.length;
+    const beforeRestartB = gameRoomPlayerB.messages.length;
+    gameRoomPlayerA.send({ type: 'ready', ready: true });
+    gameRoomPlayerB.send({ type: 'ready', ready: true });
+    const startedMessages = await Promise.all([
+      gameRoomPlayerA.waitForPhase('started', beforeRestartA), gameRoomPlayerB.waitForPhase('started', beforeRestartB),
+    ]);
+    const fixedPlayers = startedMessages[0]!.state.startedPlayers;
+    assert.ok(fixedPlayers && fixedPlayers.length === 2);
+    assert.deepEqual(startedMessages[1]!.state.startedPlayers, fixedPlayers);
+    assert.deepEqual(startedMessages[1]!.state, startedMessages[0]!.state, 'the start snapshot is identical for both players');
+    for (const client of [gameRoomPlayerA, gameRoomPlayerB]) {
+      assert.equal(client.messages.filter(item => item.type === 'state' && item.state.phase === 'started').length, 1,
+        'the room publishes one start transition per participant');
+    }
+
+    const diceBase = new URL(endpoint);
+    diceBase.pathname = '/dice-ws';
+    gameDiceA = new DiceRoomClient(diceBase.toString(), gameRoom.id);
+    gameDiceB = new DiceRoomClient(diceBase.toString(), gameRoom.id);
+    await Promise.all([gameDiceA.open(), gameDiceB.open()]);
+    gameDiceA.send({ type: 'join', room: gameRoom.id, token: gameWelcomeA.token });
+    gameDiceB.send({ type: 'join', room: gameRoom.id, token: gameWelcomeB.token });
+    const [diceWelcomeA, diceWelcomeB] = await Promise.all([gameDiceA.waitForWelcome(), gameDiceB.waitForWelcome()]);
+    assert.equal(diceWelcomeA.playerId, gameWelcomeA.playerId);
+    assert.equal(diceWelcomeB.playerId, gameWelcomeB.playerId);
+    assert.equal(diceWelcomeA.match?.roundNumber, 1);
+    assert.deepEqual(diceWelcomeA.match, diceWelcomeB.match);
+    assert.deepEqual(diceWelcomeA.state.seats.map(seat => seat.id), fixedPlayers.map(seat => seat.id));
+    assert.equal(diceWelcomeA.state.turnId, fixedPlayers[0]!.id);
+    assert.equal(typeof diceWelcomeA.state.boardSeed, 'number');
+    assert.deepEqual(diceWelcomeA.state, diceWelcomeB.state);
+    gameDiceA.send({ type: 'roll', requestId: `stage10-${randomUUID()}`, turnSequence: diceWelcomeA.state.turnSequence });
+    const unavailable = await gameDiceA.waitForError();
+    assert.equal(unavailable.code, 'UNAVAILABLE', 'stage 10 connects the game but leaves turn commands for stage 11');
   } finally {
     playerA.close();
     playerB.close();
     replacement?.close();
+    gameRoomPlayerA?.close();
+    gameRoomPlayerB?.close();
+    gameDiceA?.close();
+    gameDiceB?.close();
     dice?.terminate();
   }
 }

@@ -201,7 +201,7 @@ export class GameRoomObject {
       room.exitLobby(context.id, context.peer);
       context.id = '';
       context.socket.close(1000, 'left room');
-    } else if (message.type === 'clock') {
+    } else if (message.type === 'clock' || message.type === 'ready') {
       room.commandLobby(context.id, context.peer, message);
     }
   }
@@ -220,7 +220,9 @@ export class GameRoomObject {
       context.timeout = undefined;
       context.id = room.connectDice(context.peer, { token: message.token, dev: message.dev }) ?? '';
       if (!context.id) context.socket.close(1008, 'join rejected');
+      return;
     }
+    this.send(context.socket, { type: 'error', code: 'UNAVAILABLE', message: 'STGでは現在、対戦の開始まで確認できます。' });
   }
 
   private onClose(context: Connection) {
