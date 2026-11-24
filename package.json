@@ -11,6 +11,7 @@
     "dev:dice-server": "node --import tsx src/platform/local-demo-servers/dice/server/start.ts",
     "dev:casino-server": "node --import tsx src/platform/local-demo-servers/casino-entry/server/start.ts",
     "build": "vp build",
+    "build:stg": "vp build --mode stg --outDir dist-stg",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

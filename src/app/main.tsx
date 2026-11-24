@@ -1,19 +1,20 @@
 import { lazy, Suspense } from 'react';
-import type { ComponentType, LazyExoticComponent } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 
-const previews = {
-  dice: lazy(() => import('./previews/DicePreview')),
+const Dice = lazy(() => import('./previews/DicePreview'));
+const Casino = lazy(() => import('./previews/CasinoEntryPreview'));
+const previews = import.meta.env.MODE === 'stg' ? null : {
+  dice: Dice,
   board: lazy(() => import('./previews/BoardPreview')),
   effects: lazy(() => import('./previews/EffectsPreview')),
   players: lazy(() => import('./previews/PlayersPreview')),
-  casino: lazy(() => import('./previews/CasinoEntryPreview')),
+  casino: Casino,
   bank: lazy(() => import('./previews/BankPreview')),
   result: lazy(() => import('./previews/ResultPreview')),
-} satisfies Record<string, LazyExoticComponent<ComponentType>>;
+};
 
-type PreviewId = keyof typeof previews;
+type PreviewId = keyof NonNullable<typeof previews>;
 
 const options: readonly { id: PreviewId; label: string; description: string }[] = [
   { id: 'dice', label: '3D ダイス', description: '物理ロールとルーム同期' },
@@ -29,14 +30,13 @@ function App() {
   const params = new URLSearchParams(location.search);
   const game = params.get('game');
   const gameRoom = game === 'dice' && /^[a-f0-9]{8}$/i.test(params.get('room') ?? '');
-  const value = params.get('preview');
-  const selected = value && Object.hasOwn(previews, value) ? value as PreviewId : null;
+  const value = import.meta.env.MODE === 'stg' ? null : params.get('preview');
+  const selected = value && previews && Object.hasOwn(previews, value) ? value as PreviewId : null;
   const showList = value === 'list';
   if (gameRoom) {
-    const Dice = previews.dice;
     return <Suspense fallback={<div className="preview-loading" role="status">対戦を読み込んでいます…</div>}><Dice /></Suspense>;
   }
-  if (selected) {
+  if (selected && previews) {
     const Preview = previews[selected];
     const label = options.find(option => option.id === selected)?.label ?? 'プレビュー';
     return <>
@@ -51,7 +51,6 @@ function App() {
   }
 
   if (!showList) {
-    const Casino = previews.casino;
     return <Suspense fallback={<div className="preview-loading" role="status">カジノを読み込んでいます…</div>}>
       <Casino />
     </Suspense>;
