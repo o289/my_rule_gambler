@@ -60,12 +60,13 @@ export interface ConnectionView {
   problem: string;
   metrics: Metrics | null;
   pending: boolean;
+  returningToLobby: boolean;
   placement: PlacementFeedback | null;
 }
 
 const HOLD: ConnectionView = {
   status: 'connecting', playerId: null, dev: false, game: null, settlementSnapshot: null, match: null, settlements: [], roll: null, tray: null,
-  problem: '', metrics: null, pending: false, placement: null,
+  problem: '', metrics: null, pending: false, returningToLobby: false, placement: null,
 };
 
 export class DiceConnection {
@@ -145,7 +146,7 @@ export class DiceConnection {
     socket.addEventListener('close', event => {
       if (this.socket !== socket) return;
       this.socket = null;
-      this.update({ status: 'offline', pending: false });
+      this.update({ status: 'offline', pending: false, returningToLobby: false });
       if (!this.active || event.code === 4001) return;
       this.retry = window.setTimeout(() => this.connect(), this.delay);
       this.delay = Math.min(3000, this.delay * 1.7);
@@ -165,7 +166,7 @@ export class DiceConnection {
         this.update({
           status: 'online', playerId: message.playerId, game: message.state, settlementSnapshot: null, roll: message.roll,
           dev: message.dev, match: message.match ?? null, settlements: this.settlementQueue.getSnapshot(), tray: message.view ? message.roll?.id ?? null : null,
-          pending: false, problem: '', placement: null,
+          pending: false, returningToLobby: false, problem: '', placement: null,
         });
         break;
       case 'state': {
@@ -205,13 +206,18 @@ export class DiceConnection {
       case 'metrics':
         this.update({ metrics: message.metrics });
         break;
+      case 'lobby-returned':
+        if (this.current.returningToLobby && this.current.game?.revision === message.revision) {
+          window.location.replace(`/?room=${encodeURIComponent(this.room)}`);
+        }
+        break;
       case 'error':
         if (message.code === 'TOKEN') {
           this.token = undefined;
           try { sessionStorage.removeItem(this.key); }
           catch { this.update({ problem: 'このタブの接続を再開します。' }); }
         }
-        this.update({ pending: false, problem: message.message });
+        this.update({ pending: false, returningToLobby: false, problem: message.message });
     }
   }
 
@@ -238,5 +244,13 @@ export class DiceConnection {
 
   dismissConfirmedRoll(rollId: string) {
     if (this.current.tray === rollId && this.current.roll?.id === rollId && this.current.roll.confirmed) this.update({ tray: null });
+  }
+
+  returnToLobby(ready: boolean) {
+    const { game, status, returningToLobby } = this.current;
+    if (status !== 'online' || returningToLobby || game?.phase !== 'finished') return;
+    if (this.send({ type: 'return-lobby', ready, revision: game.revision })) {
+      this.update({ returningToLobby: true, problem: '' });
+    }
   }
 }

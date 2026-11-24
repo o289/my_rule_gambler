@@ -72,7 +72,7 @@ function CountdownChip({ deadline, offset }: { deadline: number; offset: number 
   </div>;
 }
 
-function VipLobby({ info, room, setReady, leave, blocked, deadline, enteringGame }: {
+export function VipLobby({ info, room, setReady, leave, blocked, deadline, enteringGame }: {
   info: ConnectionView;
   room: CasinoRoomInfo;
   setReady: (ready: boolean) => void;

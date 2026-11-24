@@ -1,5 +1,5 @@
 import { COUNTDOWN_MS, MAX_PLAYERS } from '../../../shared/contracts/casino-entry';
-import type { CasinoRoomInfo, LobbyState, ServerMessage as LobbyMessage } from '../../../shared/contracts/casino-entry';
+import type { CasinoRoomInfo, LobbyState, Seat, ServerMessage as LobbyMessage } from '../../../shared/contracts/casino-entry';
 import type { ClientMessage as DiceClientMessage, DiceResult, Frame, GameState, MatchPlayerSetup, MatchSetup, MatchSettlementEvent, RollKind, RollView, ServerMessage as DiceMessage } from '../../../shared/contracts/dice';
 import { createGoalBoard } from '../../../features/board/model/goal-layout';
 import { cellKey, goalColumn } from '../../../features/board/model/board-model';
@@ -95,6 +95,7 @@ export class Room {
   private boardDefinition: BoardDefinition | null = null;
   private roundNumber = 1;
   private usedBoardSeeds = new Set<number>();
+  private matchSeats: readonly Seat[] = [];
   private matchParticipants: MatchParticipant[] | null = null;
   private unusedDiceIds: string[] = [];
   private completedRows: string[] = [];
@@ -117,7 +118,9 @@ export class Room {
   get started() { return this.lobby.startedPlayers !== null; }
 
   private lobbyParticipants(): LobbyParticipant[] {
-    return this.participants.map(({ id, name, slot, ready, peer }) => ({ id, name, slot, ready, online: peer !== null }));
+    return this.participants.map(({ id, name, slot, ready, peer }) => ({ id, name, slot, ready,
+      online: this.started ? peer !== null : peer?.protocol === 'lobby',
+    }));
   }
 
   private lobbyState(): LobbyState {
@@ -126,7 +129,7 @@ export class Room {
 
   private dicePlayers(): DiceGamePlayer[] {
     const order = this.mode === 'standard'
-      ? this.lobby.startedPlayers?.map(seat => seat.id) ?? []
+      ? this.matchSeats.map(seat => seat.id)
       : this.participants.map(participant => participant.id);
     return order.flatMap(id => {
       const participant = this.participants.find(item => item.id === id);
@@ -141,7 +144,7 @@ export class Room {
   private gameState(): GameState | null {
     if (!this.game) return null;
     const players = this.mode === 'standard'
-      ? this.lobby.startedPlayers ?? []
+      ? this.matchSeats
       : this.participants.map(({ id, name, slot, ready, peer }) => ({ id, name, slot, ready, online: peer !== null }));
     const seats = players.map(player => {
       const participant = this.participants.find(item => item.id === player.id);
@@ -177,7 +180,7 @@ export class Room {
       completedRows: this.completedRows,
       result: this.matchResult,
       players: this.matchParticipants.flatMap(({ handDiceIds, ...account }) => {
-        const seat = this.lobby.startedPlayers?.find(item => item.id === account.id);
+        const seat = this.matchSeats.find(item => item.id === account.id);
         const rank = ranks.get(account.id);
         return seat && rank !== undefined ? [{ ...account, name: seat.name, slot: seat.slot, rank, diceCount: handDiceIds.length }] : [];
       }),
@@ -185,14 +188,22 @@ export class Room {
   }
 
   private initializeGame() {
-    if (this.game) return false;
+    const previous = this.game;
+    if (previous && previous.phase !== 'finished') return;
     this.boardSeed = this.nextBoardSeed();
     this.boardDefinition = createGoalBoard(this.boardSeed);
-    if (this.mode === 'standard') this.initializeMatchParticipants();
-    this.game = initialDiceGameState();
-    const firstId = this.mode === 'standard' ? this.lobby.startedPlayers?.[0]?.id : this.participants[0]?.id;
+    if (this.mode === 'standard') {
+      this.matchSeats = this.lobby.startedPlayers ?? [];
+      this.roundNumber = 1;
+      this.completedRows = [];
+      this.matchResult = null;
+      this.initializeMatchParticipants();
+    }
+    this.game = previous
+      ? { ...initialDiceGameState(), revision: previous.revision + 1, turnSequence: previous.turnSequence }
+      : initialDiceGameState();
+    const firstId = this.mode === 'standard' ? this.matchSeats[0]?.id : this.participants[0]?.id;
     if (firstId) this.game = setFirstTurn(this.game, firstId);
-    return true;
   }
 
   private nextBoardSeed() {
@@ -237,8 +248,7 @@ export class Room {
   }
 
   private initializeMatchParticipants() {
-    const seats = this.lobby.startedPlayers;
-    if (!seats || this.matchParticipants) return;
+    const seats = this.matchSeats;
     const dicePerPlayer = Math.floor(30 / seats.length);
     const assignedDiceCount = dicePerPlayer * seats.length;
     const ids = Array.from({ length: 30 }, (_, index) => `${this.info.id}-die-${String(index + 1).padStart(2, '0')}`);
@@ -304,7 +314,10 @@ export class Room {
     }
     const participant = joined.participant;
     joined.previous?.close(4001, 'session replaced');
-    if (!joined.previous && !this.cancelCountdown()) this.checkReady();
+    if (!joined.previous || joined.previous.protocol === 'dice') {
+      const cancelled = this.cancelCountdown();
+      if (!cancelled || this.game?.phase === 'finished') this.checkReady();
+    }
     peer.send({
       type: 'welcome', playerId: participant.id, token: participant.token,
       room: this.info, state: this.lobbyState(),
@@ -315,7 +328,7 @@ export class Room {
 
   connectDice(peer: DicePeer, options: { token?: string; dev?: boolean }) {
     if (this.mode === 'standard') {
-      if (!this.started || !this.game) {
+      if (!this.game || (!this.started && this.game.phase !== 'finished')) {
         peer.send({ type: 'error', code: 'NOT_STARTED', message: '対戦はまだ始まっていません。' });
         return null;
       }
@@ -324,7 +337,7 @@ export class Room {
         return null;
       }
       const member = this.participants.find(item => item.token === options.token && !item.exited);
-      if (!member || !this.lobby.startedPlayers?.some(seat => seat.id === member.id)) {
+      if (!member || !this.matchSeats.some(seat => seat.id === member.id)) {
         peer.send({ type: 'error', code: 'PARTICIPANT', message: 'この席は対戦に参加していません。' });
         return null;
       }
@@ -337,6 +350,7 @@ export class Room {
     const participant = joined.participant;
     joined.previous?.close(4001, 'session replaced');
     if (!this.game) return null;
+    if (!this.started && this.game.phase === 'finished') this.cancelCountdown();
     if (this.mode === 'preview' && !this.game.turnId) this.game = setFirstTurn(this.game, participant.id);
     const state = this.gameState();
     if (!state) return null;
@@ -358,6 +372,7 @@ export class Room {
   }
 
   private checkReady() {
+    if (this.game?.phase === 'finished' && this.participants.some(participant => participant.peer?.protocol === 'dice')) return;
     const next = scheduleLobbyCountdown(this.lobby, this.lobbyParticipants(), this.runtime.now(), this.countdownMs);
     if (next === this.lobby) return;
     this.lobby = next;
@@ -376,10 +391,7 @@ export class Room {
       }
       this.countdown = null;
       this.lobby = resolution.state;
-      if (resolution.status === 'started' && !this.game && this.initializeGame()) {
-        const firstId = resolution.state.startedPlayers?.[0]?.id;
-        if (firstId && this.game) this.game = setFirstTurn(this.game, firstId);
-      }
+      if (resolution.status === 'started') this.initializeGame();
       this.publish();
     }, Math.max(1, delayMs));
     this.countdown = timer;
@@ -444,6 +456,20 @@ export class Room {
   commandDice(playerId: string, peer: DicePeer, message: DiceCommand) {
     const participant = this.participants.find(item => item.id === playerId && item.peer === peer);
     if (!participant || !this.game || !this.boardDefinition) return;
+    if (message.type === 'return-lobby') {
+      if (this.mode !== 'standard' || this.game.phase !== 'finished' || message.revision !== this.game.revision) {
+        this.sendDiceError(peer, 'RESULT', '対戦が終了してから待機室へ戻れます。');
+        return;
+      }
+      if (this.started) {
+        this.lobby = { ...this.lobby, startedPlayers: null };
+        for (const seat of this.participants) seat.ready = false;
+      }
+      participant.ready = message.ready;
+      peer.send({ type: 'lobby-returned', revision: message.revision });
+      this.publish();
+      return;
+    }
     if (this.mode === 'standard' && this.matchResult) return;
     if (message.type === 'confirm') {
       if (this.rollView?.id !== message.rollId || !this.rollView.results.length) return;
@@ -537,7 +563,7 @@ export class Room {
           if (!beforeCompleted && afterCompleted && row && goal && goalPlacement && settledPlayer) {
             const beforeRanks = rankPlayers(this.matchParticipants);
             const afterRanks = rankPlayers(settlement.players);
-            const seatById = new Map(this.lobby.startedPlayers?.map(seat => [seat.id, seat]) ?? []);
+            const seatById = new Map(this.matchSeats.map(seat => [seat.id, seat]));
             const makeRanks = (ranks: ReadonlyMap<string, number>) => this.matchParticipants?.flatMap(item => {
               const seat = seatById.get(item.id);
               const rank = ranks.get(item.id);

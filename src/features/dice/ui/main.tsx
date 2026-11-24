@@ -12,6 +12,7 @@ import { DiceConnection } from './connection';
 import type { ConnectionView } from './connection';
 import { PerformanceMonitor } from './monitor';
 import { MatchPanel } from './match-panel';
+import { FinalResults } from './final-results';
 import { DiceSound } from './sound';
 import { preloadDice } from './face-canvases';
 import { placementCandidates } from '../model/placement-feedback';
@@ -141,7 +142,6 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const current = game?.seats.find(item => item.id === game.turnId);
   const settlement = info.settlements[0];
   const finalResult = info.match?.result?.status === 'won' ? info.match.result : null;
-  const showFinalResults = Boolean(hasStandardMatch && finalResult && !settlement);
   const settlementKey = settlement ? `${settlement.boardSeed}:${settlement.revision}` : null;
   const boardRef = useRef<HTMLElement>(null);
   const mainArea = useRef<HTMLElement>(null);
@@ -298,15 +298,9 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
       <TurnAnnouncement key={game.turnSequence} player={{ playerName: current.name, isLocal: own }} pulse />
     </section>}
     <div className="settlement-stage">
-    {showFinalResults && info.match ? <section className="final-results-screen" aria-labelledby="final-results-title">
-      <h2 id="final-results-title">最終結果</h2>
-      <ol aria-label="最終順位">
-        {[...info.match.players].sort((left, right) => left.rank - right.rank || left.slot - right.slot).map(player =>
-          <li key={player.id}><span>{player.rank}位</span><span>{player.name}</span><strong>{player.score}点</strong></li>)}
-      </ol>
-      {finalResult && <p>{finalResult.winners.length > 1 ? '同率優勝' : '優勝'}：
-        {finalResult.winners.map(id => info.match?.players.find(player => player.id === id)?.name ?? id).join('、')}</p>}
-    </section> : <div className="table-layout">
+    {finalResult && info.match && !settlement ? <FinalResults players={info.match.players} winners={finalResult.winners}
+      connected={info.status === 'online'} pending={info.returningToLobby} problem={info.problem}
+      onReturn={ready => connection.returnToLobby(ready)} /> : <div className="table-layout">
       <section className="game-board" ref={mainArea} aria-label="メイン演出エリア" data-view={surface}>
         {trayRoll ? <DiceRollPanel key={trayRoll.id} roll={trayRoll} info={info} setFps={setFps}
           onConfirm={confirm} onDismiss={dismissRoll} stream={connection.frames} onCup={cupSound} />

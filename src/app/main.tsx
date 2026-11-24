@@ -10,6 +10,7 @@ const previews = {
   players: lazy(() => import('./previews/PlayersPreview')),
   casino: lazy(() => import('./previews/CasinoEntryPreview')),
   bank: lazy(() => import('./previews/BankPreview')),
+  result: lazy(() => import('./previews/ResultPreview')),
 } satisfies Record<string, LazyExoticComponent<ComponentType>>;
 
 type PreviewId = keyof typeof previews;
@@ -21,6 +22,7 @@ const options: readonly { id: PreviewId; label: string; description: string }[] 
   { id: 'players', label: 'プレイヤー', description: 'VIP 情報、順位、通知' },
   { id: 'casino', label: 'カジノエントリー', description: '入場、ルーム作成・参加、READY' },
   { id: 'bank', label: 'バンク', description: 'コインと金庫の取引演出' },
+  { id: 'result', label: '最終結果', description: '順位と再戦・待機室への移動' },
 ];
 
 function App() {
@@ -71,7 +73,7 @@ function App() {
         <span className="preview-card-arrow" aria-hidden="true">↗</span>
       </a>)}
     </nav>
-    <footer className="preview-footer">開発用デモ一覧 · 6要素</footer>
+    <footer className="preview-footer">開発用デモ一覧 · {options.length}要素</footer>
   </main>;
 }
 

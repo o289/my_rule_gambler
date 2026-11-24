@@ -506,7 +506,7 @@ test('a four-player completed board redeals seven dice each, leaves two unused, 
   } finally { registry.dispose(); }
 });
 
-test('reaching 500 wins on an unfinished board and reconnect cannot resume a finished game', async () => {
+test('reaching 500 ends the match and players can return individually before a fresh match', async () => {
   const registry = new RoomRegistry(runtime, 5);
   try {
     const room = registry.create({ id: 'c0ffee22', name: '終局と再接続' });
@@ -626,5 +626,53 @@ test('reaching 500 wins on an unfinished board and reconnect cannot resume a fin
       turnSequence: finished.state.turnSequence });
     assert.equal(dice.flatMap(peer => peer.messages).filter(item => item.type === 'state').length, beforeFinishedCommands,
       'a finished game rejects stale, duplicate, and new turn commands');
+
+    const revision = finished.state.revision;
+    room.commandDice(ids[0]!, replacement, { type: 'return-lobby', ready: true, revision: revision - 1 });
+    assert.equal(replacement.messages.at(-1)?.type, 'error');
+    assert.equal(room.started, true);
+
+    room.commandDice(ids[0]!, replacement, { type: 'return-lobby', ready: true, revision });
+    assert.ok(replacement.messages.some(message => message.type === 'lobby-returned' && message.revision === revision));
+    const replay = new LobbyGuest();
+    room.connectLobby(replay, lobby[0]!.welcome.token);
+    assert.equal(replay.welcome.playerId, ids[0]);
+    assert.equal(replay.state.seats.find(seat => seat.id === ids[0])?.ready, true);
+    const otherFinished = latest(dice[1]!);
+    assert.equal(otherFinished.state.phase, 'finished');
+    assert.deepEqual(otherFinished.match?.result, finished.match?.result, 'returning does not clear the other player’s result');
+
+    const visitor = new LobbyGuest();
+    room.connectLobby(visitor);
+    room.commandLobby(visitor.welcome.playerId, visitor, { type: 'ready', ready: true });
+    assert.equal(replay.state.phase, 'waiting', 'a connected player still viewing results keeps the next countdown from starting');
+    room.exitLobby(visitor.welcome.playerId, visitor);
+
+    const otherDice = new DiceGuest();
+    room.connectDice(otherDice, { token: lobby[1]!.welcome.token });
+    assert.deepEqual(latest(otherDice).match?.result, finished.match?.result, 'a player can reconnect to their result after the lobby reopens');
+    room.commandDice(ids[1]!, otherDice, { type: 'return-lobby', ready: false, revision });
+    assert.ok(otherDice.messages.some(message => message.type === 'lobby-returned'));
+    const returning = new LobbyGuest();
+    room.connectLobby(returning, lobby[1]!.welcome.token);
+    assert.equal(returning.state.seats.find(seat => seat.id === ids[1])?.ready, false);
+    assert.equal(returning.state.phase, 'waiting');
+    room.commandLobby(ids[1]!, returning, { type: 'ready', ready: true });
+    assert.equal(returning.state.phase, 'countdown');
+    await delay(20);
+    assert.equal(replay.state.phase, 'started');
+
+    const rematch = new DiceGuest();
+    room.connectDice(rematch, { token: lobby[0]!.welcome.token });
+    const reset = latest(rematch);
+    assert.equal(reset.state.phase, 'ready');
+    assert.equal(reset.state.turnId, ids[0]);
+    assert.ok(reset.state.revision > revision);
+    assert.ok(reset.state.turnSequence > finished.state.turnSequence);
+    assert.notEqual(reset.state.boardSeed, finished.state.boardSeed);
+    assert.deepEqual(reset.state.placements, []);
+    assert.equal(reset.match?.result, null);
+    assert.equal(reset.match?.roundNumber, 1);
+    assert.deepEqual(reset.match?.players.map(player => [player.score, player.diceCount]), [[80, 15], [80, 15]]);
   } finally { registry.dispose(); }
 });

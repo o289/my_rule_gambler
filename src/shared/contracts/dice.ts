@@ -131,6 +131,7 @@ export type ClientMessage =
   | { type: 'confirm'; rollId: string }
   | { type: 'config'; config: RollConfig }
   | { type: 'place'; rollId: string; dieId: string; row: number; column?: number; revision?: number }
+  | { type: 'return-lobby'; ready: boolean; revision: number }
   | { type: 'end-turn'; revision: number; turnSequence?: number };
 
 export type ServerMessage =
@@ -138,6 +139,7 @@ export type ServerMessage =
   | { type: 'state'; state: GameState; roll: RollView | null; match?: MatchSetup; settlement?: MatchSettlementEvent }
   | { type: 'frame'; frame: Frame }
   | { type: 'metrics'; metrics: Metrics }
+  | { type: 'lobby-returned'; revision: number }
   | { type: 'error'; code: string; message: string };
 
 const roomPattern = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -187,6 +189,9 @@ export function readClientMessage(value: unknown): ClientMessage | null {
     case 'end-turn':
       return int(value.revision) && (value.turnSequence === undefined || int(value.turnSequence))
         ? { type: 'end-turn', revision: value.revision, turnSequence: value.turnSequence } : null;
+    case 'return-lobby':
+      return typeof value.ready === 'boolean' && int(value.revision)
+        ? { type: 'return-lobby', ready: value.ready, revision: value.revision } : null;
     default:
       return null;
   }
@@ -329,6 +334,7 @@ function metrics(value: unknown): value is Metrics {
 export function readServerMessage(value: unknown): ServerMessage | null {
   if (!record(value)) return null;
   switch (value.type) {
+    case 'lobby-returned': return int(value.revision) ? { type: 'lobby-returned', revision: value.revision } : null;
     case 'frame': return frame(value.frame) ? { type: 'frame', frame: value.frame } : null;
     case 'state':
       return gameState(value.state) && (value.roll === null || rollView(value.roll))

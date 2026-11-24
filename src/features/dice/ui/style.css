@@ -89,6 +89,13 @@ body {
 .final-results-screen li { display: grid; grid-template-columns: 3.5em minmax(0, 1fr) auto; gap: 10px; padding: 10px 12px; border-bottom: 1px solid #8d68454d; }
 .final-results-screen li strong { color: #ffe1a5; }
 .final-results-screen > p { margin: 18px 0 0; color: #ffe1a5; text-align: center; font-weight: 700; }
+.final-results-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr));
+  gap: 10px;
+  max-width: 430px;
+  margin: 24px auto 0;
+}
 .game-board {
   --main-scene-height: clamp(240px, 56dvh, 520px);
   position: relative;
