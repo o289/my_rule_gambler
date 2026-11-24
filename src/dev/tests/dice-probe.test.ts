@@ -5,6 +5,8 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { test } from 'node:test';
 import { WebSocket } from 'ws';
+import { parseRoomId, parseRoomName, readServerMessage as readLobbyServerMessage } from '../../shared/contracts/casino-entry';
+import type { ServerMessage as LobbyServerMessage } from '../../shared/contracts/casino-entry';
 
 process.env.WRANGLER_LOG_PATH ??= '/tmp/gambler-wrangler-test.log';
 process.env.WRANGLER_SEND_METRICS ??= 'false';
@@ -74,6 +76,34 @@ class ProbeClient {
   }
 }
 
+class LobbyClient {
+  readonly socket: WebSocket;
+  readonly messages: LobbyServerMessage[] = [];
+
+  constructor(endpoint: string, room: string) {
+    const url = new URL(endpoint);
+    url.searchParams.set('room', room);
+    this.socket = new WebSocket(url);
+    this.socket.on('message', data => {
+      const message = readLobbyServerMessage(JSON.parse(data.toString()));
+      if (message) this.messages.push(message);
+    });
+  }
+
+  async open() { await once(this.socket, 'open'); }
+  send(value: unknown) { this.socket.send(JSON.stringify(value)); }
+  async waitFor(type: LobbyServerMessage['type']) {
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const message = this.messages.find(item => item.type === type);
+      if (message) return message;
+      await new Promise(resolve => setTimeout(resolve, 10));
+    }
+    throw new Error(`Timed out waiting for ${type}`);
+  }
+  close() { this.socket.terminate(); }
+}
+
 function eventsForRoll(client: ProbeClient, rollId: string) {
   return client.events.filter(event => (event.rollId ?? event.frame?.rollId) === rollId);
 }
@@ -99,6 +129,102 @@ function assertMotionFrames(frames: readonly ProbeEvent[]) {
   const last = frames.at(-1)?.frame;
   assert.equal(last?.phase, 'settled');
   assert.ok(last?.dice.length && last.dice.every(die => die.stopped), 'the final frame shows every die stopped');
+}
+
+async function verifyRoomAdmission(endpoint: string, pageUrl: URL) {
+  const apiUrl = new URL('/api/rooms', pageUrl);
+  const foreignOrigin = await fetch(apiUrl, {
+    method: 'POST', headers: { origin: 'https://other.example', 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'should not exist' }),
+  });
+  assert.equal(foreignOrigin.status, 403);
+
+  const create = async (name: string) => {
+    const response = await fetch(apiUrl, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
+    });
+    assert.equal(response.status, 201);
+    const value: unknown = await response.json();
+    assert.ok(typeof value === 'object' && value !== null && 'id' in value && 'name' in value);
+    assert.equal(typeof value.id, 'string');
+    assert.equal(typeof value.name, 'string');
+    if (typeof value.id !== 'string' || typeof value.name !== 'string') throw new Error('Room response fields are invalid');
+    assert.match(value.id, /^[a-f0-9]{8}$/);
+    assert.equal(parseRoomId(value.id), value.id);
+    assert.equal(parseRoomName(value.name), value.name);
+    assert.deepEqual(Object.keys(value).sort(), ['id', 'name']);
+    return { id: value.id, name: value.name };
+  };
+
+  const roomA = await create(`stg-${randomUUID().slice(0, 8)}-a`);
+  const roomB = await create(`stg-${randomUUID().slice(0, 8)}-b`);
+  assert.notEqual(roomA.id, roomB.id);
+  for (const path of ['/casino-ws', '/dice-ws']) {
+    const unknown = new URL(path, pageUrl);
+    unknown.searchParams.set('room', 'deadbeef');
+    assert.equal((await fetch(unknown)).status, 404);
+    assert.equal((await fetch(unknown)).status, 404);
+    const existing = new URL(path, pageUrl);
+    existing.searchParams.set('room', roomA.id);
+    assert.equal((await fetch(existing)).status, 426);
+  }
+
+  const lobbyBase = new URL(endpoint);
+  lobbyBase.pathname = '/casino-ws';
+  const playerA = new LobbyClient(lobbyBase.toString(), roomA.id);
+  const playerB = new LobbyClient(lobbyBase.toString(), roomB.id);
+  let dice: WebSocket | null = null;
+  let replacement: LobbyClient | null = null;
+  try {
+    await Promise.all([playerA.open(), playerB.open()]);
+    playerA.send({ type: 'join', room: roomA.id });
+    playerB.send({ type: 'join', room: roomB.id });
+    const [welcomeAValue, welcomeBValue] = await Promise.all([playerA.waitFor('welcome'), playerB.waitFor('welcome')]);
+    if (welcomeAValue.type !== 'welcome' || welcomeBValue.type !== 'welcome') throw new Error('Expected room welcome messages');
+    assert.equal(welcomeAValue.room.id, roomA.id);
+    assert.equal(welcomeAValue.room.name, roomA.name);
+    assert.equal(welcomeBValue.room.id, roomB.id);
+    assert.equal(welcomeBValue.room.name, roomB.name);
+    assert.equal(welcomeAValue.state.seats.length, 1);
+    assert.equal(welcomeBValue.state.seats.length, 1);
+    assert.match(welcomeAValue.token, /^[A-Za-z0-9_-]{32}$/);
+    assert.equal(new URL(playerA.socket.url).searchParams.has('token'), false);
+
+    const diceUrl = new URL(endpoint);
+    diceUrl.pathname = '/dice-ws';
+    diceUrl.searchParams.set('room', roomA.id);
+    dice = new WebSocket(diceUrl);
+    await once(dice, 'open');
+    const notStarted = new Promise<LobbyServerMessage>((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error('Timed out waiting for NOT_STARTED')), 10_000);
+      dice?.once('message', data => {
+        clearTimeout(timeout);
+        const message = readLobbyServerMessage(JSON.parse(data.toString()));
+        if (message) resolve(message);
+        else reject(new Error('Unexpected dice connection response'));
+      });
+    });
+    dice.send(JSON.stringify({ type: 'join', room: roomA.id, token: welcomeAValue.token }));
+    const diceMessage = await notStarted;
+    assert.equal(diceMessage.type, 'error');
+    if (diceMessage.type === 'error') assert.equal(diceMessage.code, 'NOT_STARTED');
+    dice.terminate();
+    dice = null;
+
+    playerA.send({ type: 'leave' });
+    await once(playerA.socket, 'close');
+    replacement = new LobbyClient(lobbyBase.toString(), roomA.id);
+    await replacement.open();
+    replacement.send({ type: 'join', room: roomA.id });
+    const replacementValue = await replacement.waitFor('welcome');
+    if (replacementValue.type !== 'welcome') throw new Error('Expected replacement welcome');
+    assert.equal(replacementValue.state.seats.length, 1);
+  } finally {
+    playerA.close();
+    playerB.close();
+    replacement?.close();
+    dice?.terminate();
+  }
 }
 
 test('STG dice probe streams matching physics frames and results to two clients in separate rooms', { timeout: 45_000 }, async () => {
@@ -155,6 +281,7 @@ test('STG dice probe streams matching physics frames and results to two clients 
       const assets = readdirSync('dist-stg/assets');
       assert.equal(assets.some(name => /(?:Board|Effects|Players|Bank|Result)Preview/.test(name)), false,
         'STG build omits standalone preview chunks');
+      await verifyRoomAdmission(endpoint, pageUrl);
     }
     await Promise.all(clients.map(client => client.open()));
     const baselineStarted = performance.now();

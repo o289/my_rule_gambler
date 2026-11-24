@@ -21,6 +21,10 @@
           {
             "name": "DICE_PROBE_ROOMS",
             "class_name": "DiceProbeRoom"
+          },
+          {
+            "name": "GAME_ROOMS",
+            "class_name": "GameRoomObject"
           }
         ]
       },
@@ -28,6 +32,10 @@
         {
           "tag": "probe-v1",
           "new_sqlite_classes": ["DiceProbeRoom"]
+        },
+        {
+          "tag": "game-room-v1",
+          "new_sqlite_classes": ["GameRoomObject"]
         }
       ]
     }

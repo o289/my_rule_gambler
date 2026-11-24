@@ -132,7 +132,9 @@ export class DiceConnection {
     if (!this.active) return;
     this.update({ status: 'connecting' });
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${scheme}//${location.host}/dice-ws`);
+    const endpoint = new URL(`${scheme}//${location.host}/dice-ws`);
+    if (import.meta.env.MODE === 'stg') endpoint.searchParams.set('room', this.room);
+    const socket = new WebSocket(endpoint);
     this.socket = socket;
     socket.addEventListener('open', () => {
       if (this.socket !== socket) return;
