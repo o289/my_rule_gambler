@@ -35,7 +35,7 @@ export const casinoTokenStorageKey = (room: string) => `atelier-noir-casino-entr
 type Join = Extract<ClientMessage, { type: 'join' }>;
 type Access = Extract<ClientMessage, { type: 'create' | 'join' }>;
 type Session = { roomId: string; token: string };
-type Pending = { complete: (result: Admission) => void; timeout: number };
+type Pending = { complete: (result: Admission) => void; timeout: number; abort: AbortController };
 
 export class CasinoConnection implements CasinoRoomTransport {
   private current = HOLD;
@@ -89,11 +89,54 @@ export class CasinoConnection implements CasinoRoomTransport {
     if (this.pending || this.session) return Promise.resolve({ ok: false, problem: 'ルームへの接続を処理中です。' });
     this.delay = 290;
     return new Promise(resolve => {
-      const pending = { complete: resolve, timeout: window.setTimeout(() => this.reject(NO_CONNECTION), ADMISSION_TIMEOUT_MS) };
+      const pending = {
+        complete: resolve,
+        timeout: window.setTimeout(() => this.reject(NO_CONNECTION), ADMISSION_TIMEOUT_MS),
+        abort: new AbortController(),
+      };
       this.pending = pending;
       this.update({ ...HOLD, status: 'connecting' });
-      if (this.pending === pending) this.connect(request);
+      if (this.pending === pending) {
+        if (import.meta.env.MODE === 'stg' && request.type === 'create') void this.createRoom(request.name, pending);
+        else this.connect(request);
+      }
     });
+  }
+
+  private async createRoom(name: string, pending: Pending) {
+    try {
+      const endpoint = new URL(this.url);
+      endpoint.protocol = endpoint.protocol === 'wss:' ? 'https:' : 'http:';
+      endpoint.pathname = '/api/rooms';
+      endpoint.search = '';
+      endpoint.hash = '';
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name }),
+        signal: pending.abort.signal,
+      });
+      let payload: unknown;
+      try { payload = await response.json(); }
+      catch { payload = null; }
+      if (this.pending !== pending) return;
+      if (!response.ok) {
+        const problem = typeof payload === 'object' && payload !== null && 'error' in payload && typeof payload.error === 'string'
+          ? payload.error : NO_CONNECTION;
+        this.reject(problem);
+        return;
+      }
+      if (typeof payload !== 'object' || payload === null || !('id' in payload) || !('name' in payload)
+        || typeof payload.id !== 'string' || parseRoomId(payload.id) !== payload.id
+        || typeof payload.name !== 'string' || parseRoomName(payload.name) !== payload.name) {
+        this.reject(NO_CONNECTION);
+        return;
+      }
+      this.connect({ type: 'join', room: payload.id });
+    } catch {
+      if (this.pending === pending) this.reject(NO_CONNECTION);
+    }
   }
 
   private finishAdmission(result: Admission) {
@@ -101,6 +144,7 @@ export class CasinoConnection implements CasinoRoomTransport {
     if (!pending) return;
     this.pending = null;
     window.clearTimeout(pending.timeout);
+    pending.abort.abort();
     pending.complete(result);
   }
 
@@ -175,7 +219,13 @@ export class CasinoConnection implements CasinoRoomTransport {
   private connect(request: Access) {
     let socket: WebSocket;
     try {
-      socket = new WebSocket(this.url);
+      if (import.meta.env.MODE === 'stg' && request.type === 'join') {
+        const endpoint = new URL(this.url);
+        endpoint.searchParams.set('room', request.room);
+        socket = new WebSocket(endpoint);
+      } else {
+        socket = new WebSocket(this.url);
+      }
     } catch {
       if (this.pending) this.reject(NO_CONNECTION);
       else this.reconnect();

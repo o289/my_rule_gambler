@@ -8,9 +8,12 @@ import { PhysicsRoll } from '../../../features/dice/server/physics';
 import type { PhysicsRuntime } from '../../../features/dice/server/physics';
 import { advanceRoll } from '../../server/core/dice/roll-engine';
 import type { DiceResult, RollKind } from '../../../shared/contracts/dice';
+import { parseRoomName } from '../../../shared/contracts/casino-entry';
+import { GameRoomObject } from '../game-room';
 
 interface ProbeEnvironment {
   DICE_PROBE_ROOMS: DurableObjectNamespace;
+  GAME_ROOMS: DurableObjectNamespace;
   ASSETS: { fetch(request: Request): Promise<Response> };
 }
 
@@ -66,11 +69,62 @@ function delay(ms: number) {
   return new Promise<void>(resolve => setTimeout(resolve, ms));
 }
 
+function json(value: unknown, status = 200) {
+  return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json; charset=utf-8' } });
+}
+
+function hasSameOrigin(request: Request) {
+  const origin = request.headers.get('Origin');
+  if (!origin) return true;
+  try { return new URL(origin).origin === new URL(request.url).origin; }
+  catch { return false; }
+}
+
+function newRoomId() {
+  const bytes = crypto.getRandomValues(new Uint8Array(4));
+  return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function createGameRoom(request: Request, env: ProbeEnvironment) {
+  if (!hasSameOrigin(request)) return json({ error: 'Forbidden' }, 403);
+  if (Number(request.headers.get('content-length') ?? 0) > 4096) return json({ error: 'Invalid room name' }, 400);
+  let payload: unknown;
+  try {
+    const text = await request.text();
+    if (text.length > 4096) return json({ error: 'Invalid room name' }, 400);
+    payload = JSON.parse(text);
+  } catch {
+    return json({ error: 'Invalid room name' }, 400);
+  }
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return json({ error: 'Invalid room name' }, 400);
+  const name = (payload as Record<string, unknown>).name;
+  if (typeof name !== 'string' || parseRoomName(name) !== name) return json({ error: 'ルーム名を1〜32文字で入力してください。' }, 400);
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const id = newRoomId();
+    const room = env.GAME_ROOMS.get(env.GAME_ROOMS.idFromName(id));
+    const created = await room.fetch(new Request('https://room.internal/__create', {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, name }),
+    }));
+    if (created.status === 409) continue;
+    if (created.status !== 201) return json({ error: 'ルームを作成できませんでした。' }, 503);
+    return created;
+  }
+  return json({ error: 'ルームを作成できませんでした。もう一度お試しください。' }, 503);
+}
+
 export default {
   async fetch(request: Request, env: ProbeEnvironment): Promise<Response> {
     const url = new URL(request.url);
     if (url.searchParams.has('preview')) return new Response('Not found', { status: 404 });
-    if (url.pathname === '/casino-ws' || url.pathname === '/dice-ws') return new Response('Not found', { status: 404 });
+    if (url.pathname === '/api/rooms') {
+      return request.method === 'POST' ? createGameRoom(request, env) : json({ error: 'Method not allowed' }, 405);
+    }
+    if (url.pathname === '/casino-ws' || url.pathname === '/dice-ws') {
+      const id = url.searchParams.get('room');
+      if (!id || !/^[a-f0-9]{8}$/.test(id)) return new Response('Room not found', { status: 404 });
+      return env.GAME_ROOMS.get(env.GAME_ROOMS.idFromName(id)).fetch(request);
+    }
     if (url.pathname !== '/dice-probe') return env.ASSETS.fetch(request);
     const roomName = url.searchParams.get('room');
     if (!roomName || !/^[a-zA-Z0-9_-]{1,64}$/.test(roomName)) return new Response('Invalid room', { status: 400 });
@@ -188,3 +242,5 @@ export class DiceProbeRoom {
     }
   }
 }
+
+export { GameRoomObject };
