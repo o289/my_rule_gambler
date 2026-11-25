@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 import { RoomRegistry } from '../../platform/server/core/room-registry';
+import { Room, ROOM_SESSION_GRACE_MS } from '../../platform/server/core/room';
 import type { RoomRuntime } from '../../platform/server/core/ports';
 import type { LobbyPeer, DicePeer } from '../../platform/server/core/room';
 import type { ServerMessage as LobbyMessage } from '../../shared/contracts/casino-entry';
@@ -176,6 +177,59 @@ test('standard startup allocates thirty dice and eighty points exactly once for 
       assert.equal(boardSeedCalls - before, 1, 'subsequent player connections reuse the started board');
     } finally { registry.dispose(); }
   }
+});
+
+test('room snapshot reopens the seat and rolls back an unconfirmed physical result', async () => {
+  const info = { id: 'baddcafe', name: '復旧確認' };
+  const room = new Room(info, runtime, { mode: 'standard', countdownMs: 5 });
+  const lobby = [new LobbyGuest(), new LobbyGuest()];
+  lobby.forEach(peer => room.connectLobby(peer));
+  lobby.forEach(peer => room.commandLobby(peer.welcome.playerId, peer, { type: 'ready', ready: true }));
+  await delay(20);
+
+  const dice = [new DiceGuest(), new DiceGuest()];
+  dice.forEach((peer, index) => room.connectDice(peer, { token: lobby[index]!.welcome.token }));
+  const firstId = lobby[0]!.welcome.playerId;
+  room.commandDice(firstId, dice[0]!, { type: 'roll', requestId: 'interrupted-roll', turnSequence: 1 });
+  const rolling = [...dice[0]!.messages].reverse().find(message => message.type === 'state' && message.state.phase === 'rolling');
+  assert.ok(rolling?.type === 'state' && rolling.roll);
+  const settledFrame: Frame = { ...rolling.roll.latest, phase: 'settled', seq: 1,
+    dice: rolling.roll.latest.dice.map(die => ({ ...die, stopped: true })) };
+  assert.ok(completeRoll);
+  completeRoll(settledFrame, settledFrame.dice.map(die => ({ id: die.id, gem: 'ruby', approximate: false })), 0, false);
+  const confirmed = [...dice[0]!.messages].reverse().find(message => message.type === 'state' && message.state.phase === 'confirm');
+  assert.ok(confirmed?.type === 'state' && confirmed.roll?.results.length);
+
+  const snapshot = room.snapshot();
+  assert.equal(snapshot.game?.phase, 'ready', 'a physics result that was not confirmed is not durable');
+  assert.equal(snapshot.rollView, null);
+  const restored = Room.restore(info, runtime, snapshot);
+  assert.ok(restored);
+  const returned = new DiceGuest();
+  assert.equal(restored.connectDice(returned, { token: lobby[0]!.welcome.token }), firstId);
+  const welcome = returned.messages.find(message => message.type === 'welcome');
+  assert.ok(welcome?.type === 'welcome');
+  assert.equal(welcome.state.phase, 'ready');
+  assert.equal(welcome.roll, null);
+  assert.equal(welcome.match?.players.find(player => player.id === firstId)?.score, 80);
+
+  const beforeDuplicate = returned.messages.length;
+  restored.commandDice(firstId, returned, { type: 'roll', requestId: 'interrupted-roll', turnSequence: 1 });
+  assert.equal(returned.messages.length, beforeDuplicate, 'the accepted operation ID is still remembered after rollback');
+
+  const expired = restored.snapshot();
+  const member = expired.participants.find(participant => participant.id === firstId);
+  assert.ok(member);
+  member.online = false;
+  member.leftAt = Date.now() - ROOM_SESSION_GRACE_MS - 1;
+  expired.lastOccupiedAt = member.leftAt;
+  const afterExpiry = Room.restore(info, runtime, expired);
+  assert.ok(afterExpiry);
+  afterExpiry.prune(Date.now());
+  const rejected = new LobbyGuest();
+  assert.equal(afterExpiry.connectLobby(rejected, lobby[0]!.welcome.token), null);
+  assert.ok(rejected.messages.some(message => message.type === 'error' && message.code === 'TOKEN'));
+  assert.equal(afterExpiry.info.id, info.id, 'expiring a seat keeps the room metadata intact');
 });
 
 test('preview rooms are isolated from reserved eight-hex gameplay rooms', () => {

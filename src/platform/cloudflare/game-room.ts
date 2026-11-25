@@ -6,16 +6,22 @@ import type { ClientMessage as DiceClientMessage, ServerMessage as DiceServerMes
 import { Room } from '../server/core/room';
 import type { RoomRuntime } from '../server/core/ports';
 import type { DicePeer, LobbyPeer } from '../server/core/room';
+import type { CloudflareRoomRuntimeOptions } from './room-runtime';
 import { createCloudflareRoomRuntime } from './room-runtime';
 
 interface RoomStorage {
   get<T>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
+  getAlarm?(): Promise<number | null>;
+  setAlarm?(scheduledTime: number): Promise<void>;
+  deleteAlarm?(): Promise<void>;
 }
 
 export interface RoomObjectState {
   storage: RoomStorage;
   blockConcurrencyWhile(callback: () => Promise<void>): Promise<void>;
+  waitUntil?(promise: Promise<unknown>): void;
+  abort?(reason: string): void;
 }
 
 interface ConnectionBase {
@@ -63,19 +69,150 @@ export class GameRoomObject {
   private readonly runtime: RoomRuntime;
   private readonly connections = new Set<WebSocket>();
   private readonly ready: Promise<void>;
+  private readonly timers = new Map<number, { at: number; callback: () => void }>();
+  private readonly closeAfterCommit = new Map<WebSocket, { code: number; reason: string }>();
+  private nextTimerId = 0;
+  private alarmAt: number | null = null;
+  private persistenceTail: Promise<void> = Promise.resolve();
+  private messageTail: Promise<void> = Promise.resolve();
+  private persistedSnapshot: string | null = null;
+  private persistenceBlocked = false;
 
-  constructor(private readonly state: RoomObjectState, runtime = createCloudflareRoomRuntime()) {
-    this.runtime = runtime;
+  constructor(private readonly state: RoomObjectState, runtimeOptions: CloudflareRoomRuntimeOptions = {}) {
+    this.runtime = createCloudflareRoomRuntime({
+      ...runtimeOptions,
+      schedule: (callback, delayMs) => this.schedule(callback, delayMs),
+      cancelTimer: timer => this.cancelTimer(timer),
+    });
     this.ready = state.blockConcurrencyWhile(async () => {
+      this.alarmAt = await state.storage.getAlarm?.() ?? null;
       const saved = roomInfo(await state.storage.get<unknown>('room'));
       if (!saved) return;
       this.roomInfo = saved;
-      this.room = new Room(saved, this.runtime, { mode: 'standard' });
+      const persisted = await state.storage.get<unknown>('room-state');
+      if (persisted === undefined) {
+        this.room = new Room(saved, this.runtime, { mode: 'standard' });
+      } else {
+        this.room = Room.restore(saved, this.runtime, persisted) ?? null;
+        if (!this.room) this.persistenceBlocked = true;
+        else {
+          this.persistedSnapshot = JSON.stringify(persisted);
+          this.room.prune(this.runtime.now());
+          await this.persistCurrentState();
+        }
+      }
     });
+  }
+
+  private schedule(callback: () => void, delayMs: number) {
+    const id = ++this.nextTimerId;
+    this.timers.set(id, { at: Date.now() + delayMs, callback });
+    return id;
+  }
+
+  private cancelTimer(handle: unknown) {
+    if (typeof handle === 'number') this.timers.delete(handle);
+  }
+
+  private enqueuePersistence(operation: () => Promise<void>) {
+    const task = this.persistenceTail.then(async () => {
+      if (!this.persistenceBlocked) await operation();
+    });
+    const safeTask = task.catch(() => { this.abortForPersistenceFailure(); });
+    this.persistenceTail = safeTask;
+    this.state.waitUntil?.(safeTask);
+    return safeTask;
+  }
+
+  private abortForPersistenceFailure() {
+    if (this.persistenceBlocked) return;
+    this.persistenceBlocked = true;
+    this.state.abort?.('Unable to persist room state');
+    for (const socket of this.connections) {
+      try { socket.close(1011, 'room persistence failed'); } catch { /* The connection may already be closed. */ }
+    }
+  }
+
+  private async persistSnapshot(snapshot: ReturnType<Room['snapshot']>) {
+    const encoded = JSON.stringify(snapshot);
+    if (encoded === this.persistedSnapshot) return;
+    await this.state.storage.put('room-state', snapshot);
+    this.persistedSnapshot = encoded;
+  }
+
+  private async updateAlarm() {
+    const roomDeadline = this.room?.nextDeadlineAt() ?? null;
+    const timerDeadline = [...this.timers.values()].reduce<number | null>(
+      (current, timer) => current === null ? timer.at : Math.min(current, timer.at), null,
+    );
+    const deadlines = [roomDeadline, timerDeadline].filter((value): value is number => value !== null);
+    const next = deadlines.length ? Math.max(Date.now() + 1, Math.min(...deadlines)) : null;
+    if (next === this.alarmAt) return;
+    if (next === null) {
+      await this.state.storage.deleteAlarm?.();
+      this.alarmAt = null;
+    } else if (next !== this.alarmAt) {
+      await this.state.storage.setAlarm?.(next);
+      this.alarmAt = next;
+    }
+  }
+
+  private persistCurrentState() {
+    const snapshot = this.room?.snapshot();
+    return this.enqueuePersistence(async () => {
+      await Promise.all([snapshot ? this.persistSnapshot(snapshot) : Promise.resolve(), this.updateAlarm()]);
+    });
+  }
+
+  private dispatchMessage(context: Connection, data: unknown) {
+    const task = this.messageTail.then(async () => {
+      if (this.persistenceBlocked) return;
+      this.onMessage(context, data);
+      await this.persistenceTail;
+      await this.persistCurrentState();
+      for (const [socket, close] of this.closeAfterCommit) {
+        this.closeAfterCommit.delete(socket);
+        try { socket.close(close.code, close.reason); } catch { /* The connection may already be closed. */ }
+      }
+    });
+    this.messageTail = task.catch(() => { this.abortForPersistenceFailure(); });
+    this.state.waitUntil?.(task);
+  }
+
+  private dispatchClose(context: Connection) {
+    const task = this.messageTail.then(async () => {
+      if (this.persistenceBlocked) return;
+      this.onClose(context);
+      await this.persistenceTail;
+      await this.persistCurrentState();
+    });
+    this.messageTail = task.catch(() => { this.abortForPersistenceFailure(); });
+    this.state.waitUntil?.(task);
+  }
+
+  async alarm() {
+    await this.ready;
+    this.alarmAt = null;
+    const task = this.messageTail.then(async () => {
+      if (this.persistenceBlocked) return;
+      const now = this.runtime.now();
+      const due = [...this.timers.entries()].filter(([, timer]) => timer.at <= now)
+        .sort((left, right) => left[1].at - right[1].at);
+      for (const [id, timer] of due) {
+        if (!this.timers.delete(id)) continue;
+        timer.callback();
+      }
+      this.room?.prune(now);
+      await this.persistenceTail;
+      await this.persistCurrentState();
+    });
+    this.messageTail = task.catch(() => { this.abortForPersistenceFailure(); });
+    await task;
   }
 
   async fetch(request: Request): Promise<Response> {
     await this.ready;
+    if (this.persistenceBlocked) return new Response('Room state unavailable', { status: 503 });
     const url = new URL(request.url);
     if (url.pathname === '/__create' && request.method === 'POST') return this.create(request);
     if (!this.room || !this.roomInfo) return new Response('Room not found', { status: 404 });
@@ -97,8 +234,8 @@ export class GameRoomObject {
       ? { ...base, protocol, peer: this.createLobbyPeer(socket) }
       : { ...base, protocol, peer: this.createDicePeer(socket) };
     this.connections.add(socket);
-    socket.addEventListener('message', event => this.onMessage(context, event.data));
-    socket.addEventListener('close', () => this.onClose(context));
+    socket.addEventListener('message', event => this.dispatchMessage(context, event.data));
+    socket.addEventListener('close', () => this.dispatchClose(context));
     socket.addEventListener('error', () => socket.close(1011, 'socket error'));
     return new Response(null, { status: 101, webSocket: client } as ResponseInit & { webSocket: WebSocket });
   }
@@ -149,6 +286,18 @@ export class GameRoomObject {
   }
 
   private send(socket: WebSocket, message: LobbyServerMessage | DiceServerMessage, transient = false) {
+    if (!transient && (message.type === 'state' || message.type === 'welcome' || message.type === 'lobby-returned')) {
+      const snapshot = this.room?.snapshot();
+      this.enqueuePersistence(async () => {
+        await Promise.all([snapshot ? this.persistSnapshot(snapshot) : Promise.resolve(), this.updateAlarm()]);
+        this.sendNow(socket, message);
+      });
+      return true;
+    }
+    return this.sendNow(socket, message, transient);
+  }
+
+  private sendNow(socket: WebSocket, message: LobbyServerMessage | DiceServerMessage, transient = false) {
     if (socket.readyState !== WebSocket.OPEN) return false;
     if (socket.bufferedAmount > MAX_SEND_QUEUE_BYTES) {
       socket.close(1013, 'send queue full');
@@ -202,7 +351,7 @@ export class GameRoomObject {
     if (message.type === 'leave') {
       room.exitLobby(context.id, context.peer);
       context.id = '';
-      context.socket.close(1000, 'left room');
+      this.closeAfterCommit.set(context.socket, { code: 1000, reason: 'left room' });
     } else if (message.type === 'clock' || message.type === 'ready') {
       room.commandLobby(context.id, context.peer, message);
     }

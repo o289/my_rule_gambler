@@ -8,6 +8,12 @@ import { advanceRoll } from '../server/core/dice/roll-engine';
 
 type CreateRollInput = { rollId: string; kind: RollKind; ids: readonly string[]; config: RollConfig };
 
+export interface CloudflareRoomRuntimeOptions {
+  readonly loadPhysicsRuntime?: () => PhysicsRuntime;
+  readonly schedule?: RoomRuntime['schedule'];
+  readonly cancelTimer?: RoomRuntime['cancelTimer'];
+}
+
 class CloudflareRollSession implements RollSession {
   readonly initialFrame: Frame;
   private timer: ReturnType<typeof setInterval> | undefined;
@@ -69,19 +75,19 @@ function createBoardSeed() {
   return new DataView(bytes.buffer).getUint32(0, true);
 }
 
-export function createCloudflareRoomRuntime(loadPhysicsRuntime?: () => PhysicsRuntime): RoomRuntime {
+export function createCloudflareRoomRuntime(options: CloudflareRoomRuntimeOptions = {}): RoomRuntime {
   return {
     now: () => Date.now(),
     createPlayerId: () => crypto.randomUUID(),
     createToken,
     createBoardSeed,
-    schedule: (callback, delayMs) => setTimeout(callback, delayMs),
-    cancelTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
+    schedule: options.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs)),
+    cancelTimer: options.cancelTimer ?? (timer => clearTimeout(timer as ReturnType<typeof setTimeout>)),
     createRoll(input, callbacks) {
-      if (!loadPhysicsRuntime) throw new Error('Cloudflare Rapier runtime is not configured.');
+      if (!options.loadPhysicsRuntime) throw new Error('Cloudflare Rapier runtime is not configured.');
       const physics = new PhysicsRoll({
         rollId: input.rollId, kind: input.kind, ids: [...input.ids], hz: input.config.hz,
-      }, loadPhysicsRuntime());
+      }, options.loadPhysicsRuntime());
       return new CloudflareRollSession(physics, input, callbacks);
     },
     allowPreviewDev: false,

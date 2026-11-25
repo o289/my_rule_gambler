@@ -5,7 +5,6 @@ import type { DiceResult, RollKind } from '../../../shared/contracts/dice';
 import { parseRoomName } from '../../../shared/contracts/casino-entry';
 import { GameRoomObject as GameRoomImplementation } from '../game-room';
 import { initializeCloudflareRapier } from '../rapier-runtime';
-import { createCloudflareRoomRuntime } from '../room-runtime';
 import type { RoomObjectState } from '../game-room';
 
 interface ProbeEnvironment {
@@ -228,6 +227,6 @@ export class DiceProbeRoom {
 
 export class GameRoomObject extends GameRoomImplementation {
   constructor(state: RoomObjectState) {
-    super(state, createCloudflareRoomRuntime(initializeCloudflareRapier));
+    super(state, { loadPhysicsRuntime: initializeCloudflareRapier });
   }
 }
