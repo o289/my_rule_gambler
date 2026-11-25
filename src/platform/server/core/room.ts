@@ -37,6 +37,8 @@ import { availableSeatSlot, reconnectGraceExpired, roomGraceExpired } from './pa
 import { settleCompletedRows } from './scoring';
 import { dealRoundDice } from './dice-round';
 import type { RoomRuntime, RollSession, TimerHandle } from './ports';
+import { readRoomSnapshot } from './room-snapshot';
+import type { RoomSnapshot } from './room-snapshot';
 
 export const ROOM_SESSION_GRACE_MS = 90_000;
 export const PREVIEW_ROOM_PREFIX = 'dice-preview:';
@@ -77,6 +79,11 @@ interface MatchParticipant {
   handDiceIds: string[];
 }
 
+interface RollCheckpoint {
+  readonly game: DiceGameState;
+  readonly rollView: RollView | null;
+}
+
 type LobbyCommand = { type: 'ready'; ready: boolean } | { type: 'clock'; sentAt: number };
 type DiceCommand = Exclude<DiceClientMessage, { type: 'join' }>;
 
@@ -101,6 +108,7 @@ export class Room {
   private completedRows: string[] = [];
   private matchResult: MatchSetup['result'] = null;
   private rollView: RollView | null = null;
+  private rollCheckpoint: RollCheckpoint | null = null;
   private rollSession: RollSession | null = null;
   private disposed = false;
   readonly mode: RoomMode;
@@ -110,6 +118,81 @@ export class Room {
     this.countdownMs = options.countdownMs ?? COUNTDOWN_MS;
     this.lastOccupiedAt = runtime.now();
     if (this.mode === 'preview') this.initializeGame();
+  }
+
+  snapshot(): RoomSnapshot {
+    const stableGame = this.rollCheckpoint?.game ?? this.game;
+    const stableRollView = this.rollCheckpoint ? this.rollCheckpoint.rollView : this.rollView;
+    return {
+      version: 1,
+      info: { ...this.info },
+      participants: this.participants.map(participant => ({
+        id: participant.id, name: participant.name, slot: participant.slot, ready: participant.ready,
+        token: participant.token, online: participant.peer !== null, leftAt: participant.leftAt,
+        exited: participant.exited, viewedRoll: participant.viewedRoll, dev: participant.dev,
+        seenRequests: [...participant.seenRequests],
+      })),
+      lastOccupiedAt: this.lastOccupiedAt,
+      lobby: {
+        ...this.lobby,
+        startedPlayers: this.lobby.startedPlayers?.map(seat => ({ ...seat })) ?? null,
+      },
+      game: stableGame ? { ...stableGame, board: [...stableGame.board].map(([key, placement]) => [key, { ...placement }]) } : null,
+      boardSeed: this.boardSeed,
+      roundNumber: this.roundNumber,
+      usedBoardSeeds: [...this.usedBoardSeeds],
+      matchSeats: this.matchSeats.map(seat => ({ ...seat })),
+      matchParticipants: this.matchParticipants?.map(player => ({
+        id: player.id, score: player.score, wallet: player.wallet.map(coin => ({ ...coin })), handDiceIds: [...player.handDiceIds],
+      })) ?? null,
+      unusedDiceIds: [...this.unusedDiceIds],
+      completedRows: [...this.completedRows],
+      matchResult: this.matchResult ? { ...this.matchResult, winners: [...this.matchResult.winners] } : null,
+      rollView: stableRollView ? structuredClone(stableRollView) : null,
+    };
+  }
+
+  static restore(info: CasinoRoomInfo, runtime: RoomRuntime, value: unknown) {
+    const saved = readRoomSnapshot(value, info);
+    if (!saved) return null;
+    const room = new Room(info, runtime, { mode: 'standard' });
+    const now = runtime.now();
+    room.participants = saved.participants.map(participant => ({
+      ...participant,
+      peer: null,
+      leftAt: participant.online ? now : participant.leftAt,
+      seenRequests: new Set(participant.seenRequests),
+    }));
+    room.lastOccupiedAt = saved.participants.some(participant => participant.online) ? now : saved.lastOccupiedAt;
+    room.lobby = {
+      ...saved.lobby,
+      startedPlayers: saved.lobby.startedPlayers?.map(seat => ({ ...seat })) ?? null,
+    };
+    room.game = saved.game ? { ...saved.game, board: new Map(saved.game.board) } : null;
+    room.boardSeed = saved.boardSeed;
+    room.boardDefinition = saved.boardSeed === null ? null : createGoalBoard(saved.boardSeed);
+    room.roundNumber = saved.roundNumber;
+    room.usedBoardSeeds = new Set(saved.usedBoardSeeds);
+    room.matchSeats = saved.matchSeats.map(seat => ({ ...seat }));
+    room.matchParticipants = saved.matchParticipants?.map(player => ({
+      ...player, wallet: player.wallet.map(coin => ({ ...coin })), handDiceIds: [...player.handDiceIds],
+    })) ?? null;
+    room.unusedDiceIds = [...saved.unusedDiceIds];
+    room.completedRows = [...saved.completedRows];
+    room.matchResult = saved.matchResult ? { ...saved.matchResult, winners: [...saved.matchResult.winners] } : null;
+    room.rollView = saved.rollView ? structuredClone(saved.rollView) : null;
+    if (room.lobby.startAt !== null) {
+      room.scheduleCountdown(room.lobby.generation, Math.max(1, room.lobby.startAt - now));
+    }
+    return room;
+  }
+
+  nextDeadlineAt() {
+    const deadlines = this.participants.flatMap(participant => participant.peer === null
+      ? [participant.leftAt === null ? this.lastOccupiedAt + ROOM_SESSION_GRACE_MS : participant.leftAt + ROOM_SESSION_GRACE_MS]
+      : []);
+    if (this.lobby.startAt !== null) deadlines.push(this.lobby.startAt);
+    return deadlines.length ? Math.min(...deadlines) : null;
   }
 
   private readonly countdownMs: number;
@@ -444,13 +527,13 @@ export class Room {
   }
 
   prune(now: number) {
-    if (this.participants.every(participant => !participant.peer)) return roomGraceExpired(this.lastOccupiedAt, now, ROOM_SESSION_GRACE_MS);
     const remaining = this.participants.filter(participant => participant.peer || !reconnectGraceExpired(participant.leftAt, now, ROOM_SESSION_GRACE_MS));
-    if (remaining.length === this.participants.length) return false;
-    this.participants = remaining;
-    if (this.mode === 'preview' && this.game) this.game = selectTurnAfterPrune(this.game, this.dicePlayers());
-    this.publish();
-    return false;
+    if (remaining.length !== this.participants.length) {
+      this.participants = remaining;
+      if (this.mode === 'preview' && this.game) this.game = selectTurnAfterPrune(this.game, this.dicePlayers());
+      this.publish();
+    }
+    return remaining.length === 0 && roomGraceExpired(this.lastOccupiedAt, now, ROOM_SESSION_GRACE_MS);
   }
 
   commandDice(playerId: string, peer: DicePeer, message: DiceCommand) {
@@ -481,6 +564,7 @@ export class Room {
         ? finishTurnAfterNoLegalPlacement(next, this.dicePlayers(), participant.id)
         : next;
       this.rollView = { ...this.rollView, confirmed: true };
+      this.rollCheckpoint = null;
       this.publish();
       return;
     }
@@ -656,6 +740,7 @@ export class Room {
       metrics: metrics => this.broadcastMetrics(metrics),
       finished: (frame, results, nudges, deadline) => this.finishRoll(rollId, frame, results, nudges, deadline),
     });
+    this.rollCheckpoint = { game: this.game, rollView: this.rollView };
     this.game = { ...started.state, turnNotice: kind === 'initial' ? null : this.game.turnNotice };
     this.rollSession = session;
     this.rollView = {
