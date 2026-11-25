@@ -65,12 +65,15 @@ body {
 .turn-notice { margin: 0; color: #ffdb9d; font-weight: 700; }
 .comeback-hint { margin: 10px 0 0; color: #ffdf9e; font-size: .84rem; font-weight: 700; }
 
-.table-layout {
+.dice-table-layout {
   display: grid;
-  grid-template-columns: minmax(0, clamp(520px, calc(100svh - 148px), 760px)) minmax(240px, 325px);
+  grid-template-areas: "info" "main";
+  grid-template-columns: minmax(0, 1fr);
   align-items: start;
-  gap: clamp(12px, 2vw, 25px);
+  gap: clamp(8px, 1.5vw, 17px);
 }
+.dice-game-main-column { grid-area: main; min-width: 0; width: min(100%, 900px); margin-inline: auto; }
+.dice-table-sidebar { grid-area: info; width: min(100%, 900px); margin-inline: auto; }
 .final-results-screen {
   width: min(100%, 760px); margin: 0 auto; padding: clamp(18px, 4vw, 38px);
   border: 1px solid #9a7044; border-radius: 10px; color: #f4dfbd;
@@ -95,7 +98,44 @@ body {
   min-width: 0;
   scroll-margin-block: 10px;
 }
-.table-sidebar { display: grid; gap: 8px; min-width: 0; }
+.dice-table-sidebar { display: grid; gap: 8px; min-width: 0; }
+.main-area-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  margin-bottom: 5px;
+}
+.main-area-selection { margin-right: auto; color: #ffe1a5; font-size: .84rem; font-weight: 650; }
+.main-area-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-width: 118px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 1px solid #c3945e;
+  border-radius: 6px;
+  color: #ffe1b1;
+  background: linear-gradient(145deg, #382417, #1b100c);
+  box-shadow: inset 0 0 0 1px #e2a86824;
+  font: 700 .87rem/1.15 var(--salon-serif);
+}
+.main-area-toggle span { font-size: 1.1rem; }
+.main-area-toggle:focus-visible, .quiet:focus-visible, .gold-button:focus-visible, .result-choice:focus-visible {
+  outline: 3px solid #ffe0a0;
+  outline-offset: 2px;
+}
+.main-operations {
+  display: grid;
+  align-content: start;
+  min-height: var(--main-scene-height);
+  margin: 0;
+}
+.selection-note { margin: 10px 0 0; color: #ffe1a5; font-size: .84rem; font-weight: 650; }
+.dice-game-main-column #main-area-content { min-width: 0; }
 .settlement-stage { position: relative; }
 .live-effects-layer {
   position: fixed; z-index: 100; inset: 0; display: grid; place-items: center;
@@ -283,10 +323,10 @@ body {
 
 @media (max-width: 850px) {
   .dice-salon { width: min(100% - 26px, 640px); padding-top: 10px; }
-  .table-layout { grid-template-columns: minmax(0, 1fr); gap: 8px; }
   .salon-header { min-height: 49px; padding-bottom: 8px; }
   .game-board { --main-scene-height: clamp(220px, 64vw, 440px); }
   .turn-card { padding: 13px; }
+  .main-area-toolbar { justify-content: flex-start; }
 }
 
 @media (max-width: 410px) {

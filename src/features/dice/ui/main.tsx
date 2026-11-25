@@ -26,6 +26,8 @@ import { locateCell } from '../../effects/ui/board-scene';
 import { BankAudio } from '../../bank/ui/bank-audio';
 import { SettlementBank } from './settlement-bank';
 import { SoundManager } from '../../effects/ui/sound';
+import { canShowPreviewEndTurn, canSwitchDiceMainPanel, panelForTurnChange } from '../model/main-area';
+import type { DiceMainPanel } from '../model/main-area';
 import './style.css';
 import '../../effects/ui/board-score/score-effect.css';
 
@@ -179,9 +181,12 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const showTurnChange = Boolean(turnNeedsAnnouncement && current && game);
   const canAct = own && info.status === 'online' && !info.pending && !info.match?.result
     && !settlement && !trayRoll && !placementPlaying && turnGateReady;
+  const devReroll = Boolean(info.dev && game && !game.placedThisRoll);
   const [monitor, setMonitor] = useState(false);
   const [fps, setFps] = useState<number | null>(null);
   const [choice, setChoice] = useState<{ rollId: string; dieId: string }>();
+  const [mainPanel, setMainPanel] = useState<DiceMainPanel>('board');
+  const mainPanelFocus = useRef<DiceMainPanel | null>(null);
   const remainingResults = game ? game.results.filter(result => game.remaining.includes(result.id)) : [];
   const selected = choice && choice.rollId === roll?.id ? remainingResults.find(result => result.id === choice.dieId) : undefined;
   const displayGame = settlementSnapshot?.game ?? game;
@@ -286,11 +291,80 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const bankSettlement = stage?.kind === 'bank' && settlement && settlementSnapshot
     ? { event: settlement, player: settlementSnapshot.player } : null;
   const surface = trayRoll ? 'dice' : bankSettlement ? 'bank' : 'board';
+  const canSwitchPanel = canSwitchDiceMainPanel({
+    canAct,
+    phase: game?.phase,
+    hasLegalPlacement: Boolean(game?.hasLegalPlacement),
+    remainingDice: game?.remaining.length ?? 0,
+    placedThisRoll: Boolean(game?.placedThisRoll),
+    devReroll,
+  });
+  const showPreviewEndTurn = canShowPreviewEndTurn({
+    preview: !hasStandardMatch,
+    canAct,
+    phase: game?.phase,
+    hasLegalPlacement: Boolean(game?.hasLegalPlacement),
+    placedThisRoll: Boolean(game?.placedThisRoll),
+    panelCanSwitch: canSwitchPanel,
+  });
+  const changeMainPanel = (next: DiceMainPanel) => {
+    mainPanelFocus.current = next;
+    setMainPanel(next);
+  };
+  const selectDie = (dieId: string) => {
+    if (!roll) return;
+    setChoice({ rollId: roll.id, dieId });
+    changeMainPanel('board');
+  };
   useLayoutEffect(() => {
     if (surface !== 'board') mainArea.current?.scrollIntoView({ block: 'nearest' });
   }, [surface]);
   useEffect(() => { setFps(null); }, [trayRoll?.id]);
-  const devReroll = Boolean(info.dev && game && !game.placedThisRoll);
+  useLayoutEffect(() => {
+    const waitingForLocalTurnGate = own && turnNeedsAnnouncement;
+    if (surface !== 'board' || (!canSwitchPanel && !showPreviewEndTurn && !waitingForLocalTurnGate)) {
+      mainPanelFocus.current = null;
+      setMainPanel('board');
+    }
+  }, [surface, canSwitchPanel, showPreviewEndTurn, own, turnNeedsAnnouncement]);
+  const previousTurnSequence = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const sequence = game?.turnSequence ?? null;
+    if (sequence !== null && previousTurnSequence.current !== null && sequence !== previousTurnSequence.current) {
+      mainPanelFocus.current = null;
+      setMainPanel(panelForTurnChange(own));
+      if (own) mainArea.current?.scrollIntoView({ block: 'nearest' });
+    } else if (sequence !== null && previousTurnSequence.current === null) {
+      setMainPanel(panelForTurnChange(own));
+      if (own) mainArea.current?.scrollIntoView({ block: 'nearest' });
+    }
+    previousTurnSequence.current = sequence;
+  }, [game?.turnSequence, own]);
+  const previousRoll = useRef<{ id: string | null; confirmed: boolean }>({ id: null, confirmed: false });
+  useLayoutEffect(() => {
+    const id = roll?.id ?? null;
+    const confirmed = Boolean(roll?.confirmed);
+    if (id === previousRoll.current.id && !previousRoll.current.confirmed && confirmed) setMainPanel('operations');
+    previousRoll.current = { id, confirmed };
+  }, [roll?.id, roll?.confirmed]);
+  useLayoutEffect(() => {
+    const requested = mainPanelFocus.current;
+    if (!requested || requested !== mainPanel || surface !== 'board') return;
+    mainPanelFocus.current = null;
+    const area = mainArea.current;
+    if (!area) return;
+    if (requested === 'operations') {
+      const target = area.querySelector<HTMLElement>('#main-operations .result-choice:not(:disabled)')
+        ?? area.querySelector<HTMLElement>('#main-operations button:not(:disabled)');
+      target?.focus({ preventScroll: true });
+      return;
+    }
+    const target = area.querySelector<HTMLElement>('.board-cell[aria-pressed="true"]:not(:disabled)')
+      ?? area.querySelector<HTMLElement>('.board-cell[data-state="available"]:not(:disabled)')
+      ?? area.querySelector<HTMLElement>('.board-cell:not(:disabled)');
+    (target ?? area).focus({ preventScroll: true });
+  }, [mainPanel, surface, selected, candidates]);
+  useEffect(() => { setChoice(undefined); }, [roll?.id, game?.turnSequence]);
   const perf = <PerformanceMonitor info={info} fps={fps} own={own} expanded={monitor} expand={setMonitor}
     configure={config => connection.send({ type: 'config', config })} />;
 
@@ -308,65 +382,82 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
     <div className="settlement-stage">
     {presentationMode === 'result' && finalResult && info.match ? <FinalResults players={info.match.players} winners={finalResult.winners}
       connected={info.status === 'online'} pending={info.returningToLobby} problem={info.problem}
-      onReturn={ready => connection.returnToLobby(ready)} /> : <div className="table-layout">
-      <section className="game-board" ref={mainArea} aria-label="メイン演出エリア" data-view={surface}>
+      onReturn={ready => connection.returnToLobby(ready)} /> : <div className="dice-table-layout">
+      <div className="dice-table-sidebar">
+        <MatchPanel match={info.match} turnId={game?.turnId ?? null} playerId={info.playerId}
+          turnSequence={game?.turnSequence ?? 0} settlement={settlement} effectsPlaying={Boolean(trayRoll || settlement)} />
+      </div>
+      <div className="dice-game-main-column">
+      <section className="game-board" ref={mainArea} aria-label="メイン演出エリア" data-view={surface} tabIndex={-1}>
+        {info.problem && <p className="notice main-area-notice" role="status">{info.problem}</p>}
+        {surface === 'board' && (canSwitchPanel || showPreviewEndTurn) && <div className="main-area-toolbar">
+          {mainPanel === 'board' && selected && <span className="main-area-selection" role="status">
+            {GEMS[selected.gem].name}を選択中
+          </span>}
+          {canSwitchPanel && <button type="button" className="main-area-toggle" aria-controls="main-area-content"
+            aria-pressed={mainPanel === 'operations'}
+            aria-label={mainPanel === 'board' ? inPlacement ? 'ボード操作を表示' : 'ダイス操作を表示' : 'ボードを表示'}
+            onClick={() => changeMainPanel(mainPanel === 'board' ? 'operations' : 'board')}>
+            <span aria-hidden="true">♻️</span>{mainPanel === 'board' ? '操作へ' : 'ボードへ'}
+          </button>}
+          {showPreviewEndTurn && mainPanel === 'board' && game && <button type="button" id="preview-end-turn" className="quiet"
+            disabled={!canAct || (game.hasLegalPlacement && !game.placedThisRoll)}
+            onClick={() => connection.send({ type: 'end-turn', revision: game.revision, turnSequence: game.turnSequence })}>END TURN</button>}
+        </div>}
+        <div id="main-area-content">
         {trayRoll ? <DiceRollPanel key={trayRoll.id} roll={trayRoll} info={info} setFps={setFps}
           onConfirm={confirm} onDismiss={dismissRoll} stream={connection.frames} onCup={cupSound} />
           : bankSettlement ? <SettlementBank key={settlementKey} event={bankSettlement.event} player={bankSettlement.player}
             audio={bankAudio} reduced={reducedMotion} onComplete={advanceSettlement} />
           : waitingForBoard
           ? <div className="board-loading" role="status">共有盤面を読み込んでいます…</div>
+          : mainPanel === 'operations' ? <aside className="turn-card main-operations" id="main-operations"
+            aria-labelledby="main-operations-title">
+            <div className="turn-heading"><h2 id="main-operations-title">{inPlacement ? 'ボード操作' : 'ダイス操作'}</h2>
+              <span>{game?.seats.filter(item => item.online).length ?? 0}人 接続</span></div>
+            <div id="turn-commands">
+              {inPlacement && game ? <div className="placement-actions">
+                <button type="button" id="reroll-dice" className="gold-button"
+                  disabled={!canAct || !game.remaining.length || (!game.placedThisRoll && !devReroll)}
+                  onClick={() => connection.roll('reroll')}>REROLL</button>
+                <button type="button" id="end-turn" className="quiet"
+                  disabled={!canAct || (game.hasLegalPlacement && !game.placedThisRoll)}
+                  onClick={() => connection.send({ type: 'end-turn', revision: game.revision, turnSequence: game.turnSequence })}>END TURN</button>
+              </div> : <button type="button" id="roll-dice" className="gold-button"
+                disabled={!canAct || game?.phase !== 'ready'} onClick={() => connection.roll('roll')}>ROLL DICE</button>}
+            </div>
+            <p className="turn-note">
+              {game?.turnNotice === 'no-legal-placement' ? '置けるマスがありません。手番を交代しました。'
+                : !own ? '手番のプレイヤーの操作を待っています。'
+                : !turnGateReady ? '手番の案内を表示しています。'
+                : inPlacement && game?.hasLegalPlacement ? '出目を選び、行の左端の空きマスに置きます。'
+                : inPlacement && game?.placedThisRoll && game.remaining.length ? '置けるマスがなくても、未配置ダイスを振り直すか手番を終了できます。'
+                : inPlacement && devReroll ? '開発モードでは配置前の振り直しも試せます。'
+                : inPlacement ? '置けるダイスがなければ、手番を終了します。'
+                : 'カップを傾けてダイスを振ります。'}
+            </p>
+            {comebackHint && <p className="comeback-hint" role="status">
+              あと1マスで逆転：{comebackHint.points}点の得点マスに
+              {GEMS[comebackHint.gem].name}を置くと単独首位です。
+            </p>}
+            {inPlacement && <div className="retained"><h3>確定した出目</h3>
+              {remainingResults.length > 0
+                ? <ResultStrip list={remainingResults} action={canAct && roll ? selectDie : undefined}
+                  chosen={selected?.id} />
+                : <span className="waiting-result">配置できる出目は残っていません。</span>}
+              {selected && <p className="selection-note" role="status">{GEMS[selected.gem].name}を選択中。ボードの光るマスを選んでください。</p>}
+            </div>}
+          </aside>
           : <GamblerBoard board={definition} state={board} viewportRef={boardRef} candidates={candidates}
             scoreNotice={stage?.kind === 'score' && settlement && eventTarget ? { rowId: eventTarget.rowId, label: scoreLabel(settlement.points) } : undefined}
             hintCell={comebackHint?.target}
             onSelect={cell => boardAdapter.onSelect(cell, { game, roll, selected, canAct, inPlacement, board, definition })} />}
+        </div>
         {effect?.kind === 'BIG_WIN' && eventTarget && <Suspense fallback={null}>
           <SettlementOverlay key={`${settlementKey}-${stageIndex}`} request={effect} target={eventTarget} board={definition}
             boardRef={boardRef} audio={settlementAudio} reduced={reducedMotion} onComplete={advanceSettlement} />
         </Suspense>}
       </section>
-      <div className="table-sidebar">
-      <MatchPanel match={info.match} turnId={game?.turnId ?? null} playerId={info.playerId}
-        turnSequence={game?.turnSequence ?? 0} settlement={settlement} effectsPlaying={Boolean(trayRoll || settlement)} />
-      <aside className="turn-card" aria-labelledby="turn-title">
-        <div className="turn-heading"><h2 id="turn-title">ダイス操作</h2><span>{game?.seats.filter(item => item.online).length ?? 0}人 接続</span></div>
-        <div id="turn-commands" tabIndex={-1}>
-          {inPlacement && game ? <div className="placement-actions">
-            <button type="button" id="reroll-dice" className="gold-button"
-              disabled={!canAct || !game.remaining.length || (!game.placedThisRoll && !devReroll)} onClick={() => connection.roll('reroll')}>REROLL</button>
-            <button type="button" id="end-turn" className="quiet"
-              disabled={!canAct || (game.hasLegalPlacement && !game.placedThisRoll)}
-              onClick={() => connection.send({ type: 'end-turn', revision: game.revision, turnSequence: game.turnSequence })}>END TURN</button>
-          </div> : <button type="button" id="roll-dice" className="gold-button" disabled={!canAct || game?.phase !== 'ready'}
-            onClick={() => connection.roll('roll')}>ROLL DICE</button>}
-        </div>
-        <p className="turn-note">
-          {trayRoll ? 'メインエリアにダイスの出目を表示します。'
-            : settlement ? '得点演出を表示しています。'
-            : game?.turnNotice === 'no-legal-placement' ? '置けるマスがありません。手番を交代しました。'
-            : info.match?.result ? info.match.result.status === 'won' ? '対戦結果が確定しました。' : 'ラウンドが完成しました。'
-            : info.status !== 'online' ? 'ルームに接続しています。'
-            : !own ? '手番のプレイヤーの操作を待っています。'
-            : !turnGateReady ? '手番の案内を表示しています。'
-            : inPlacement && game?.hasLegalPlacement ? '出目を選び、行の左端の空きマスに置きます。'
-            : inPlacement && game?.placedThisRoll && game.remaining.length ? '置けるマスがなくても、未配置ダイスを振り直すか手番を終了できます。'
-            : inPlacement && devReroll ? '開発モードでは配置前の振り直しも試せます。'
-            : inPlacement ? '置けるダイスがなければ、手番を終了します。'
-            : 'カップを傾けてダイスを振ります。'}
-        </p>
-        {comebackHint && <p className="comeback-hint" role="status">
-          あと1マスで逆転：{comebackHint.points}点の得点マスに
-          {GEMS[comebackHint.gem].name}を置くと単独首位です。
-        </p>}
-        {info.problem && <p className="notice" role="status">{info.problem}</p>}
-        {!trayRoll && <div className="retained"><h3>確定した出目</h3>
-          {remainingResults.length > 0
-            ? <ResultStrip list={remainingResults} action={canAct && inPlacement && roll
-              ? dieId => setChoice({ rollId: roll.id, dieId }) : undefined}
-              chosen={selected?.id} />
-            : <span className="waiting-result">{inPlacement ? '配置できる出目は残っていません。' : '出目の確定を待っています。'}</span>}
-        </div>}
-      </aside>
       </div>
     </div>}
     {settlement && stage?.kind === 'score' && <p key={settlementKey} className="sr-only" role="status" aria-live="polite">
