@@ -15,6 +15,7 @@ interface RoomStorage {
   getAlarm?(): Promise<number | null>;
   setAlarm?(scheduledTime: number): Promise<void>;
   deleteAlarm?(): Promise<void>;
+  deleteAll(): Promise<void>;
 }
 
 export interface RoomObjectState {
@@ -68,6 +69,7 @@ export class GameRoomObject {
   private room: Room | null = null;
   private readonly runtime: RoomRuntime;
   private readonly connections = new Set<WebSocket>();
+  private readonly connectionContexts = new Map<WebSocket, Connection>();
   private readonly ready: Promise<void>;
   private readonly timers = new Map<number, { at: number; callback: () => void }>();
   private readonly closeAfterCommit = new Map<WebSocket, { code: number; reason: string }>();
@@ -77,6 +79,10 @@ export class GameRoomObject {
   private messageTail: Promise<void> = Promise.resolve();
   private persistedSnapshot: string | null = null;
   private persistenceBlocked = false;
+  private closing = false;
+  private closed = false;
+  private cleanupTask: Promise<void> | null = null;
+  private dissolveRequested = false;
 
   constructor(private readonly state: RoomObjectState, runtimeOptions: CloudflareRoomRuntimeOptions = {}) {
     this.runtime = createCloudflareRoomRuntime({
@@ -86,6 +92,11 @@ export class GameRoomObject {
     });
     this.ready = state.blockConcurrencyWhile(async () => {
       this.alarmAt = await state.storage.getAlarm?.() ?? null;
+      if (await state.storage.get<string>('room-status') === 'closing') {
+        this.closing = true;
+        await this.deleteRoomData();
+        return;
+      }
       const saved = roomInfo(await state.storage.get<unknown>('room'));
       if (!saved) return;
       this.roomInfo = saved;
@@ -97,8 +108,9 @@ export class GameRoomObject {
         if (!this.room) this.persistenceBlocked = true;
         else {
           this.persistedSnapshot = JSON.stringify(persisted);
-          this.room.prune(this.runtime.now());
-          await this.persistCurrentState();
+          const expired = this.room.prune(this.runtime.now());
+          if (this.room.empty || expired) await this.dissolve();
+          else await this.persistCurrentState();
         }
       }
     });
@@ -166,10 +178,20 @@ export class GameRoomObject {
 
   private dispatchMessage(context: Connection, data: unknown) {
     const task = this.messageTail.then(async () => {
-      if (this.persistenceBlocked) return;
+      if (this.persistenceBlocked || this.closing || this.closed) return;
       this.onMessage(context, data);
+      if (this.dissolveRequested) {
+        this.dissolveRequested = false;
+        await this.dissolve();
+        return;
+      }
       await this.persistenceTail;
+      if (this.closing || this.closed) return;
       await this.persistCurrentState();
+      if (this.room?.empty && this.closeAfterCommit.has(context.socket)) {
+        await this.dissolve();
+        return;
+      }
       for (const [socket, close] of this.closeAfterCommit) {
         this.closeAfterCommit.delete(socket);
         try { socket.close(close.code, close.reason); } catch { /* The connection may already be closed. */ }
@@ -181,7 +203,11 @@ export class GameRoomObject {
 
   private dispatchClose(context: Connection) {
     const task = this.messageTail.then(async () => {
-      if (this.persistenceBlocked) return;
+      clearTimeout(context.timeout);
+      context.timeout = undefined;
+      this.connections.delete(context.socket);
+      this.connectionContexts.delete(context.socket);
+      if (this.persistenceBlocked || this.closing || this.closed) return;
       this.onClose(context);
       await this.persistenceTail;
       await this.persistCurrentState();
@@ -192,6 +218,10 @@ export class GameRoomObject {
 
   async alarm() {
     await this.ready;
+    if (this.closing && !this.closed) {
+      await this.dissolve();
+      return;
+    }
     this.alarmAt = null;
     const task = this.messageTail.then(async () => {
       if (this.persistenceBlocked) return;
@@ -202,7 +232,11 @@ export class GameRoomObject {
         if (!this.timers.delete(id)) continue;
         timer.callback();
       }
-      this.room?.prune(now);
+      const expired = this.room?.prune(now) ?? false;
+      if (expired) {
+        await this.dissolve();
+        return;
+      }
       await this.persistenceTail;
       await this.persistCurrentState();
     });
@@ -212,8 +246,13 @@ export class GameRoomObject {
 
   async fetch(request: Request): Promise<Response> {
     await this.ready;
-    if (this.persistenceBlocked) return new Response('Room state unavailable', { status: 503 });
     const url = new URL(request.url);
+    if (this.closing || this.closed) {
+      return url.pathname === '/__create' && request.method === 'POST'
+        ? json({ error: 'Room ID collision' }, 409)
+        : new Response('Room not found', { status: 404 });
+    }
+    if (this.persistenceBlocked) return new Response('Room state unavailable', { status: 503 });
     if (url.pathname === '/__create' && request.method === 'POST') return this.create(request);
     if (!this.room || !this.roomInfo) return new Response('Room not found', { status: 404 });
     if (url.pathname !== '/casino-ws' && url.pathname !== '/dice-ws') return new Response('Not found', { status: 404 });
@@ -234,6 +273,7 @@ export class GameRoomObject {
       ? { ...base, protocol, peer: this.createLobbyPeer(socket) }
       : { ...base, protocol, peer: this.createDicePeer(socket) };
     this.connections.add(socket);
+    this.connectionContexts.set(socket, context);
     socket.addEventListener('message', event => this.dispatchMessage(context, event.data));
     socket.addEventListener('close', () => this.dispatchClose(context));
     socket.addEventListener('error', () => socket.close(1011, 'socket error'));
@@ -342,6 +382,10 @@ export class GameRoomObject {
         context.socket.close(4003, 'invalid room join');
         return;
       }
+      if (room.prune(this.runtime.now())) {
+        this.dissolveRequested = true;
+        return;
+      }
       clearTimeout(context.timeout);
       context.timeout = undefined;
       context.id = room.connectLobby(context.peer, message.token) ?? '';
@@ -367,6 +411,10 @@ export class GameRoomObject {
         context.socket.close(4003, 'invalid room join');
         return;
       }
+      if (room.prune(this.runtime.now())) {
+        this.dissolveRequested = true;
+        return;
+      }
       clearTimeout(context.timeout);
       context.timeout = undefined;
       context.id = room.connectDice(context.peer, { token: message.token, dev: message.dev }) ?? '';
@@ -379,8 +427,57 @@ export class GameRoomObject {
 
   private onClose(context: Connection) {
     clearTimeout(context.timeout);
-    this.connections.delete(context.socket);
     if (!context.id || !this.room) return;
     this.room.disconnect(context.id, context.peer);
+  }
+
+  private async dissolve() {
+    if (this.closed) return;
+    this.closing = true;
+    if (this.cleanupTask) return this.cleanupTask;
+    this.cleanupTask = this.deleteRoomData();
+    try {
+      await this.cleanupTask;
+    } catch {
+      for (const socket of this.connections) {
+        try { socket.close(1011, 'room cleanup pending'); } catch { /* The socket may already be closed. */ }
+      }
+      throw new Error('Room cleanup is pending');
+    } finally {
+      this.cleanupTask = null;
+    }
+  }
+
+  private async deleteRoomData() {
+    this.closing = true;
+    this.room?.dispose();
+    this.timers.clear();
+    const retryAt = Date.now() + 1000;
+    // Keep a durable retry intent before deletion. SQLite writes in this turn are atomic.
+    await Promise.all([
+      this.state.storage.put('room-status', 'closing'),
+      this.state.storage.setAlarm?.(retryAt) ?? Promise.resolve(),
+    ]);
+    this.alarmAt = retryAt;
+    try {
+      await this.state.storage.deleteAll();
+      this.closed = true;
+      this.alarmAt = null;
+      this.persistedSnapshot = null;
+      this.roomInfo = null;
+      this.room = null;
+      for (const [socket, context] of this.connectionContexts) {
+        clearTimeout(context.timeout);
+        context.timeout = undefined;
+        try { socket.close(1000, 'room dissolved'); } catch { /* The socket may already be closed. */ }
+      }
+      this.connectionContexts.clear();
+      this.connections.clear();
+    } catch (error) {
+      // deleteAll also removes the alarm, so restore the retry alarm if it failed.
+      await this.state.storage.setAlarm?.(retryAt);
+      this.alarmAt = retryAt;
+      throw error;
+    }
   }
 }
