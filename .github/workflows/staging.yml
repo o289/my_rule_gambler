@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: stg-worker
+  cancel-in-progress: false
+
 jobs:
   checks:
     name: Lint, typecheck, tests, build
@@ -60,9 +64,35 @@ jobs:
         run: npm ci
 
       - name: Deploy STG Worker
-        run: |
-          npx --no-install wrangler deploy --env stg
-          npx --no-install wrangler deployments list --env stg --json | jq -er 'last | .id | strings | select(length > 0)'
+        run: npx --no-install wrangler deploy --env stg --message "Git ${GITHUB_SHA}"
         env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+      - name: Verify STG deployment and record version
+        id: deployed
+        run: |
+          STATUS="$(npx --no-install wrangler deployments status --env stg --json)"
+          DEPLOYMENT_ID="$(jq -er '.id | strings | select(length > 0)' <<<"$STATUS")"
+          VERSION_ID="$(jq -er 'if (.versions | length) == 1 and .versions[0].percentage == 100 then .versions[0].version_id | strings | select(length > 0) else error("STG is not on a single 100% Worker version") end' <<<"$STATUS")"
+          if [[ ! "$STG_HOSTNAME" =~ ^[A-Za-z0-9.-]+$ ]]; then
+            echo "STG_HOSTNAME is missing or invalid" >&2
+            exit 1
+          fi
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            "https://${STG_HOSTNAME}/" --output /dev/null
+          echo "deployment_id=$DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "version_id=$VERSION_ID" >> "$GITHUB_OUTPUT"
+          {
+            printf '%s\n' '### STG deployment succeeded'
+            printf -- '- Worker: `%s`\n' 'gambler-stg'
+            printf -- '- Commit: `%s`\n' "$GITHUB_SHA"
+            printf -- '- Deployment ID: `%s`\n' "$DEPLOYMENT_ID"
+            printf -- '- Worker version: `%s` (100%% traffic)\n' "$VERSION_ID"
+            printf -- '- HTTPS: `%s`\n' "https://${STG_HOSTNAME}/"
+            printf -- '- Run: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          STG_HOSTNAME: ${{ vars.STG_HOSTNAME }}
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

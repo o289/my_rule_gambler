@@ -202,6 +202,7 @@ test('room snapshot reopens the seat and rolls back an unconfirmed physical resu
   assert.ok(confirmed?.type === 'state' && confirmed.roll?.results.length);
 
   const snapshot = room.snapshot();
+  assert.equal(snapshot.version, 1, 'the active persistence format is explicitly versioned');
   assert.equal(snapshot.game?.phase, 'ready', 'a physics result that was not confirmed is not durable');
   assert.equal(snapshot.rollView, null);
   const restored = Room.restore(info, runtime, snapshot);
