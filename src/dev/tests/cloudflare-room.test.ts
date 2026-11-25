@@ -6,6 +6,8 @@ class MemoryStorage {
   private readonly values = new Map<string, unknown>();
   async get<T>(key: string) { return this.values.get(key) as T | undefined; }
   async put(key: string, value: unknown) { this.values.set(key, value); }
+  async deleteAll() { this.values.clear(); }
+  get size() { return this.values.size; }
 }
 
 test('GameRoomObject refuses a second metadata reservation for the same ID', async () => {
@@ -17,4 +19,15 @@ test('GameRoomObject refuses a second metadata reservation for the same ID', asy
   });
   assert.equal((await object.fetch(request())).status, 201);
   assert.equal((await object.fetch(request())).status, 409);
+});
+
+test('GameRoomObject completes a pending dissolution before serving the old ID', async () => {
+  const storage = new MemoryStorage();
+  await storage.put('room', { id: 'a1b2c3d4', name: 'test room' });
+  await storage.put('room-state', { version: 1 });
+  await storage.put('room-status', 'closing');
+  const object = new GameRoomObject({ storage, blockConcurrencyWhile: callback => callback() });
+  const response = await object.fetch(new Request('https://room.internal/casino-ws?room=a1b2c3d4'));
+  assert.equal(response.status, 404);
+  assert.equal(storage.size, 0, 'the retry removes metadata, status, and snapshots together');
 });

@@ -243,7 +243,6 @@ async function verifyRoomAdmission(endpoint: string, pageUrl: URL) {
   const playerA = new LobbyClient(lobbyBase.toString(), roomA.id);
   const playerB = new LobbyClient(lobbyBase.toString(), roomB.id);
   let dice: WebSocket | null = null;
-  let replacement: LobbyClient | null = null;
   let gameRoomPlayerA: LobbyClient | null = null;
   let gameRoomPlayerB: LobbyClient | null = null;
   let gameDiceA: DiceRoomClient | null = null;
@@ -286,12 +285,11 @@ async function verifyRoomAdmission(endpoint: string, pageUrl: URL) {
 
     playerA.send({ type: 'leave' });
     await once(playerA.socket, 'close');
-    replacement = new LobbyClient(lobbyBase.toString(), roomA.id);
-    await replacement.open();
-    replacement.send({ type: 'join', room: roomA.id });
-    const replacementValue = await replacement.waitFor('welcome');
-    if (replacementValue.type !== 'welcome') throw new Error('Expected replacement welcome');
-    assert.equal(replacementValue.state.seats.length, 1);
+    for (const path of ['/casino-ws', '/dice-ws']) {
+      const oldRoom = new URL(path, pageUrl);
+      oldRoom.searchParams.set('room', roomA.id);
+      assert.equal((await fetch(oldRoom)).status, 404, 'dissolved room IDs are not implicitly recreated');
+    }
 
     const gameRoom = await create(`stg-${randomUUID().slice(0, 8)}-ready`);
     gameRoomPlayerA = new LobbyClient(lobbyBase.toString(), gameRoom.id);
@@ -416,7 +414,6 @@ async function verifyRoomAdmission(endpoint: string, pageUrl: URL) {
   } finally {
     playerA.close();
     playerB.close();
-    replacement?.close();
     gameRoomPlayerA?.close();
     gameRoomPlayerB?.close();
     gameDiceA?.close();
