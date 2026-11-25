@@ -20,7 +20,7 @@ import { ROLL_RESULT_DISPLAY_MS, rollPresentationAction } from '../model/roll-pr
 import { TURN_CHANGE_DURATION_MS, REDUCED_TURN_CHANGE_DURATION_MS } from '../../effects/model/effect-model';
 import { scoreLabel } from '../../effects/model/effect-model';
 import { TurnAnnouncement } from '../../effects/ui/settlement-scenes';
-import { oneCellComebackHint, settlementStages } from '../model/settlement-presentation';
+import { dicePresentationMode, oneCellComebackHint, settlementStages } from '../model/settlement-presentation';
 import { PLACEMENT_FLASH_MS, REDUCED_SCORE_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
 import { locateCell } from '../../effects/ui/board-scene';
 import { BankAudio } from '../../bank/ui/bank-audio';
@@ -134,14 +134,22 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   useAudioActivation(bankAudio.unlock);
   const info = useSyncExternalStore(connection.subscribe, connection.getSnapshot);
   const { game, roll } = info;
-  const trayRoll = roll && roll.id === info.tray ? roll : null;
+  const settlement = info.settlements[0];
+  const settlementSnapshot = info.settlementSnapshot;
+  const finalResult = info.match?.result?.status === 'won' ? info.match.result : null;
+  const presentationMode = dicePresentationMode({
+    settlementPending: Boolean(settlement),
+    settlementRollId: settlementSnapshot?.rollId ?? null,
+    resultReady: Boolean(finalResult),
+    rollReady: Boolean(roll && roll.id === info.tray),
+    rollId: roll?.id ?? null,
+  });
+  const trayRoll = presentationMode === 'roll' ? roll : null;
   const own = Boolean(game?.turnId && game.turnId === info.playerId);
   const inPlacement = game?.phase === 'placement';
   const hasStandardMatch = info.match !== null;
   const [announcedTurnSequence, setAnnouncedTurnSequence] = useState<number | null>(null);
   const current = game?.seats.find(item => item.id === game.turnId);
-  const settlement = info.settlements[0];
-  const finalResult = info.match?.result?.status === 'won' ? info.match.result : null;
   const settlementKey = settlement ? `${settlement.boardSeed}:${settlement.revision}` : null;
   const boardRef = useRef<HTMLElement>(null);
   const mainArea = useRef<HTMLElement>(null);
@@ -176,7 +184,6 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const [choice, setChoice] = useState<{ rollId: string; dieId: string }>();
   const remainingResults = game ? game.results.filter(result => game.remaining.includes(result.id)) : [];
   const selected = choice && choice.rollId === roll?.id ? remainingResults.find(result => result.id === choice.dieId) : undefined;
-  const settlementSnapshot = info.settlementSnapshot;
   const displayGame = settlementSnapshot?.game ?? game;
   const seed = displayGame?.boardSeed;
   const definition = useMemo(() => boardAdapter.getDefinition(seed), [boardAdapter, seed]);
@@ -268,7 +275,7 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   }, []);
 
   const resultCount = roll?.results.length ?? 0;
-  useEffect(() => { if (info.tray && resultCount) audio.cue('result'); }, [info.tray, resultCount]);
+  useEffect(() => { if (trayRoll && resultCount) audio.cue('result'); }, [trayRoll?.id, resultCount]);
 
   const confirm = useCallback((id: string) => {
     if (connection.confirm(id)) audio.cue('confirm');
@@ -298,7 +305,7 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
       <TurnAnnouncement key={game.turnSequence} player={{ playerName: current.name, isLocal: own }} pulse />
     </section>}
     <div className="settlement-stage">
-    {finalResult && info.match && !settlement ? <FinalResults players={info.match.players} winners={finalResult.winners}
+    {presentationMode === 'result' && finalResult && info.match ? <FinalResults players={info.match.players} winners={finalResult.winners}
       connected={info.status === 'online'} pending={info.returningToLobby} problem={info.problem}
       onReturn={ready => connection.returnToLobby(ready)} /> : <div className="table-layout">
       <section className="game-board" ref={mainArea} aria-label="メイン演出エリア" data-view={surface}>

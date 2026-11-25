@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { BoardDefinition } from '../../features/board/model/board-model';
 import { cellKey } from '../../features/board/model/board-model';
-import { oneCellComebackHint, settlementFollowups, settlementRankChange, settlementStages } from '../../features/dice/model/settlement-presentation';
+import { dicePresentationMode, oneCellComebackHint, settlementFollowups, settlementRankChange, settlementStages } from '../../features/dice/model/settlement-presentation';
 import { settlementCoinMoves, settlementPlaybackCoins } from '../../features/bank/model/settlement-coins';
 import { bankBalance, selectExchange, transferCoins } from '../../features/bank/model/bank-model';
 import { settlementEffects } from '../../features/effects/model/effect-model';
@@ -101,6 +101,16 @@ test('live settlement plays placement, score and bank before rank change or vict
   assert.deepEqual(steps(event(50, { beforeRanks: ranks })), ['placement', 'score', 'bank']);
 });
 
+test('a newer roll waits behind score presentation, then final results take over', () => {
+  const input = { settlementPending: false, settlementRollId: null, resultReady: false, rollReady: false, rollId: null };
+  assert.equal(dicePresentationMode({ ...input, settlementPending: true, settlementRollId: 'scoring', rollReady: true, rollId: 'newer' }), 'settlement');
+  assert.equal(dicePresentationMode({ ...input, settlementPending: true, settlementRollId: 'scoring', rollReady: true, rollId: 'scoring' }), 'roll',
+    'the roll already on screen can finish its result reveal before scoring begins');
+  assert.equal(dicePresentationMode({ ...input, resultReady: true, rollReady: true, rollId: 'newer' }), 'result');
+  assert.equal(dicePresentationMode({ ...input, rollReady: true, rollId: 'newer' }), 'roll');
+  assert.equal(dicePresentationMode(input), 'board');
+});
+
 test('bank playback reconstructs the scoring player balance and transfers only the confirmed points', () => {
   for (const [scoreAfter, points] of [[90, -10], [0, -70], [130, 50]] as const) {
     const { wallet, reserve } = settlementPlaybackCoins(scoreAfter, points);
@@ -150,6 +160,7 @@ test('an older snapshot from the same board cannot roll back newer score or plac
   assert.equal(acceptsGameState(game(17, 9), game(18, 10)), true, 'the revision advances across a round boundary');
   assert.equal(acceptsGameState(game(18, 10), game(17, 9)), false, 'an older round cannot roll the client back');
 });
+
 
 test('one-cell comeback hint points only to an actual legal final cell for a confirmed remaining die', () => {
   const occupied = new Set([cellKey({ rowId: 'row-a', columnId: 'first' })]);

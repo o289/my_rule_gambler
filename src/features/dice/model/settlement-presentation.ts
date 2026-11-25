@@ -52,6 +52,24 @@ export function settlementStages(event: MatchSettlementEvent, board: BoardDefini
   return stages;
 }
 
+export type DicePresentationMode = 'settlement' | 'result' | 'roll' | 'board';
+
+export function dicePresentationMode(input: {
+  settlementPending: boolean;
+  settlementRollId: string | null;
+  resultReady: boolean;
+  rollReady: boolean;
+  rollId: string | null;
+}): DicePresentationMode {
+  if (input.settlementPending) {
+    if (input.rollReady && input.rollId !== null && input.rollId === input.settlementRollId) return 'roll';
+    return 'settlement';
+  }
+  if (input.resultReady) return 'result';
+  if (input.rollReady) return 'roll';
+  return 'board';
+}
+
 export interface ComebackHint {
   readonly target: CellAddress;
   readonly gem: GemId;
