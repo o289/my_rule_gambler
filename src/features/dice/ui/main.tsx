@@ -19,7 +19,7 @@ import { placementCandidates } from '../model/placement-feedback';
 import { ROLL_RESULT_DISPLAY_MS, rollPresentationAction } from '../model/roll-presentation';
 import { TURN_CHANGE_DURATION_MS, REDUCED_TURN_CHANGE_DURATION_MS } from '../../effects/model/effect-model';
 import { scoreLabel } from '../../effects/model/effect-model';
-import { TurnAnnouncement } from '../../effects/ui/settlement-scenes';
+import { TurnChangeMainScene } from '../../effects/ui/settlement-scenes';
 import { dicePresentationMode, oneCellComebackHint, settlementStages } from '../model/settlement-presentation';
 import { PLACEMENT_FLASH_MS, REDUCED_SCORE_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
 import { locateCell } from '../../effects/ui/board-scene';
@@ -376,9 +376,6 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
     {info.status !== 'online' && <p className="dice-connection-status" role="status">
       {info.status === 'offline' ? '再接続中' : '接続中'}
     </p>}
-    {showTurnChange && current && game && <section key={game.turnSequence} className="turn-change-gate" aria-label="手番の案内">
-      <TurnAnnouncement key={game.turnSequence} player={{ playerName: current.name, isLocal: own }} pulse />
-    </section>}
     <div className="settlement-stage">
     {presentationMode === 'result' && finalResult && info.match ? <FinalResults players={info.match.players} winners={finalResult.winners}
       connected={info.status === 'online'} pending={info.returningToLobby} problem={info.problem}
@@ -405,7 +402,8 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
             onClick={() => connection.send({ type: 'end-turn', revision: game.revision, turnSequence: game.turnSequence })}>END TURN</button>}
         </div>}
         <div id="main-area-content">
-        {trayRoll ? <DiceRollPanel key={trayRoll.id} roll={trayRoll} info={info} setFps={setFps}
+        {showTurnChange && current ? <TurnChangeMainScene key={game?.turnSequence} player={{ playerName: current.name, isLocal: own }} reduced={reducedMotion} />
+          : trayRoll ? <DiceRollPanel key={trayRoll.id} roll={trayRoll} info={info} setFps={setFps}
           onConfirm={confirm} onDismiss={dismissRoll} stream={connection.frames} onCup={cupSound} />
           : bankSettlement ? <SettlementBank key={settlementKey} event={bankSettlement.event} player={bankSettlement.player}
             audio={bankAudio} reduced={reducedMotion} onComplete={advanceSettlement} />

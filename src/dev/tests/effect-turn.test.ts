@@ -118,7 +118,9 @@ test('手番案内は見る人に応じた文言を使い、開始音を一度�
   assert.equal(turnLabel({ playerName: 'PLAYER 2', isLocal: false }), 'PLAYER 2の手番');
   const { player, advance, sounded } = playbackFixture();
   player.play(readEffect('TURN_CHANGE', { playerName: 'PLAYER 1', isLocal: true }), false);
-  advance(1000);
+  advance(2199);
+  assert.equal(player.getSnapshot()?.playing, true);
+  advance(2200);
   assert.equal(player.getSnapshot()?.playing, false);
   assert.deepEqual(sounded.filter(([, cue]) => cue === 'start'), [['TURN_CHANGE', 'start']]);
 });

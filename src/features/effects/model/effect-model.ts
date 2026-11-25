@@ -79,7 +79,7 @@ export interface Beat {
   cue: Cue;
 }
 
-export const TURN_CHANGE_DURATION_MS = 690;
+export const TURN_CHANGE_DURATION_MS = 2200;
 export const REDUCED_TURN_CHANGE_DURATION_MS = 200;
 export const CONVERGING_LIGHT_TRAVEL_MS = 985;
 export const CONVERGING_LIGHT_STAGGER_MS = 15;
