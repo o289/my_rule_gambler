@@ -11,6 +11,7 @@ import type { ServerMessage as DiceMessage } from '../../shared/contracts/dice';
 import type { Frame, DiceResult } from '../../shared/contracts/dice';
 import { createGoalBoard } from '../../features/board/model/goal-layout';
 import { cellKey, nextOpenCell, playableColumns, requiredGemAt } from '../../features/board/model/board-model';
+import { settlementStages } from '../../features/dice/model/settlement-presentation';
 
 let serial = 0;
 let boardSeedCalls = 0;
@@ -662,6 +663,9 @@ test('reaching 500 ends the match and players can return individually before a f
       assert.equal(eventMessage.settlement.roundNumber, 2);
       assert.equal(eventMessage.settlement.playerId, ids[0], 'the player who reached 500 triggers victory');
       assert.equal(eventMessage.settlement.afterRanks.find(item => item.rank === 1)?.id, ids[0]);
+      assert.deepEqual(settlementStages(eventMessage.settlement, createGoalBoard(eventMessage.settlement.boardSeed))
+        .map(stage => stage.kind === 'effect' ? stage.request.kind : stage.kind),
+      ['placement', 'score', 'bank', 'JACKPOT_VICTORY'], 'the actual terminal settlement plays score and bank before the winner effect');
     }
     const replacement = new DiceGuest();
     room.connectDice(replacement, { token: lobby[0]!.welcome.token });

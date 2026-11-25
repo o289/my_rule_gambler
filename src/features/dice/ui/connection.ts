@@ -45,6 +45,7 @@ export class FrameStream {
 interface SettlementSnapshot {
   game: GameState;
   player: MatchPlayerSetup;
+  rollId: string | null;
 }
 
 export interface ConnectionView {
@@ -181,7 +182,7 @@ export class DiceConnection {
         if (settlement && this.current.match) {
           const player = message.match?.players.find(item => item.id === settlement.playerId);
           if (player && this.settlementQueue.enqueue(settlement)) {
-            const snapshot = { game: message.state, player };
+            const snapshot = { game: message.state, player, rollId: message.roll?.id ?? null };
             this.settlementSnapshots.set(`${settlement.boardSeed}:${settlement.revision}`, snapshot);
             if (this.settlementQueue.getSnapshot()[0] === settlement) settlementSnapshot = snapshot;
           }
@@ -199,12 +200,15 @@ export class DiceConnection {
         });
         break;
       }
-      case 'frame':
+      case 'frame': {
         if (message.frame.rollId !== this.current.roll?.id || !this.frames.push(message.frame)) return;
-        if (this.current.tray === message.frame.rollId && message.frame.hits.length) {
+        const eventRollId = this.current.settlementSnapshot?.rollId ?? null;
+        const newerSettlementWaits = this.current.settlements.length > 0 && eventRollId !== message.frame.rollId;
+        if (!newerSettlementWaits && this.current.tray === message.frame.rollId && message.frame.hits.length) {
           for (const listener of this.impactListeners) listener(message.frame.hits);
         }
         break;
+      }
       case 'metrics':
         this.update({ metrics: message.metrics });
         break;
