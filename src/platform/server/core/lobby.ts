@@ -1,5 +1,7 @@
 import { MIN_PLAYERS } from '../../../shared/contracts/casino-entry';
 import type { LobbyState, Seat } from '../../../shared/contracts/casino-entry';
+import { DEFAULT_GAME_RULES } from '../../../shared/contracts/game-rules';
+import type { GameRules } from '../../../shared/contracts/game-rules';
 
 export interface LobbyParticipant {
   id: string;
@@ -86,6 +88,8 @@ export function createLobbyState(
   participants: readonly LobbyParticipant[],
   countdown: LobbyCountdownState,
   serverTime: number,
+  rules: GameRules = DEFAULT_GAME_RULES,
+  rulesRevision = 0,
 ): LobbyState {
   const seats = participants.map(({ id, name, slot, ready, online }) => ({ id, name, slot, ready, online }));
   const started = countdown.startedPlayers !== null;
@@ -97,5 +101,7 @@ export function createLobbyState(
     hostId: seats.find(seat => seat.online)?.id ?? null,
     startAt: started ? null : countdown.startAt,
     serverTime,
+    rules: { ...rules },
+    rulesRevision,
   };
 }

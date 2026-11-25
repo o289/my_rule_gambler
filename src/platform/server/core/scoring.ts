@@ -31,6 +31,7 @@ export function settleCompletedRows(
   state: ScoringState,
   playerId: string,
   placedRowId: string,
+  victoryPoints = 500,
 ): ScoringState {
   if (state.result) return state;
   const completed = new Set(state.completedRows);
@@ -48,7 +49,7 @@ export function settleCompletedRows(
   completed.add(row.id);
 
   const highestScore = Math.max(...players.map(player => player.score));
-  if (highestScore >= 500) {
+  if (highestScore >= victoryPoints) {
     return { players, completedRows: [...completed], result: {
       status: 'won', highestScore, winners: players.filter(player => player.score === highestScore).map(player => player.id),
     } };

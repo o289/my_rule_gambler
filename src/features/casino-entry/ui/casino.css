@@ -509,6 +509,40 @@ button { font-family: inherit; }
   text-shadow: 0 1px #172a1f;
 }
 .table-crown { width: clamp(22px, 5vw, 47px); height: auto; }
+.vip-table-rules {
+  min-height: 36px;
+  margin-top: 8px;
+  padding: 5px 13px;
+  border: 1px solid #d9b06e;
+  border-radius: 5px;
+  color: #ffe2a8;
+  background: linear-gradient(145deg, #382719ed, #18110cd9);
+  box-shadow: inset 0 0 0 1px #f7d29228, 0 0 16px #e0af5a3b;
+  font: 700 clamp(.72rem, 1.5vw, .92rem) var(--casino-serif);
+  letter-spacing: .12em;
+}
+.vip-table-rules:hover { background: linear-gradient(145deg, #53371f, #21150d); }
+.vip-table-rules:focus-visible { outline: 3px solid #ffe6aa; outline-offset: 3px; }
+
+.rules-dialog { height: min(calc(100dvh - 28px), 570px); }
+.rules-dialog .vip-shell { grid-template-rows: auto minmax(0, 1fr); }
+.rules-content { display: grid; align-content: center; gap: 18px; padding: 20px clamp(13px, 5vw, 45px); }
+.rule-option { display: grid; gap: 8px; color: var(--vip-pale); font-weight: 700; }
+.rule-option select {
+  width: 100%;
+  min-height: 46px;
+  padding: 7px 11px;
+  border: 1px solid #986b43;
+  border-radius: 5px;
+  color: #ffe7bd;
+  background: #1e130e;
+  font: 650 1rem var(--casino-serif);
+}
+.rule-option select:disabled { opacity: .72; }
+.rule-option select:focus-visible { outline: 3px solid #ffe0a0; outline-offset: 2px; }
+.rules-note { margin: 0; color: #d4b991; font-size: .82rem; line-height: 1.55; text-align: center; }
+.rules-actions { display: flex; justify-content: center; gap: 10px; margin-top: 4px; }
+.rules-actions > :is(button, .casino-action) { min-width: 120px; }
 
 .countdown-disc {
   width: 100%;

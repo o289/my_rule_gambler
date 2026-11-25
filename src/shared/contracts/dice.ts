@@ -1,5 +1,7 @@
 import { BOARD_ROWS, GEM_ORDER } from '../../features/dice/model/geometry';
 import type { GemId, Quaternion, Vec3 } from '../../features/dice/model/geometry';
+import type { GameRules } from './game-rules';
+import { dicePerPlayer, isGameRules, totalStartingDice } from './game-rules';
 
 export type RollKind = 'initial' | 'reroll';
 export type DiceHz = 120 | 240;
@@ -106,7 +108,8 @@ export interface MatchSettlementEvent {
 
 export interface MatchSetup {
   readonly roundNumber: number;
-  readonly totalDice: 30;
+  readonly totalDice: number;
+  readonly rules: GameRules;
   readonly unusedDiceCount: number;
   readonly placedDiceCount: number;
   readonly completedRows: readonly string[];
@@ -254,18 +257,20 @@ function walletGroup(value: unknown): value is MatchWalletGroup {
 }
 function matchPlayer(value: unknown): value is MatchPlayerSetup {
   return record(value) && id(value.id) && typeof value.name === 'string'
-    && int(value.slot, 0, 5) && int(value.score) && int(value.rank, 1, 6) && int(value.diceCount, 0, 30)
+    && int(value.slot, 0, 5) && int(value.score) && int(value.rank, 1, 6) && int(value.diceCount, 0, 102)
     && listOf(value.wallet, walletGroup, 3)
     && value.wallet.reduce((total: number, group: MatchWalletGroup) => total + group.denomination * group.count, 0) === value.score;
 }
 function matchSetup(value: unknown): value is MatchSetup {
-  if (!record(value) || !int(value.roundNumber, 1) || value.totalDice !== 30 || !int(value.unusedDiceCount, 0, 30) || !int(value.placedDiceCount, 0, 30)
+  if (!record(value) || !int(value.roundNumber, 1) || !int(value.totalDice, 30, 102)
+    || !isGameRules(value.rules) || !int(value.unusedDiceCount, 0, value.totalDice) || !int(value.placedDiceCount, 0, value.totalDice)
     || !listOf(value.completedRows, (item): item is string => typeof item === 'string' && item.length <= 80, 6)
-    || !(value.result === null || matchResult(value.result))
+    || !(value.result === null || matchResult(value.result, value.rules.victoryPoints))
     || !listOf(value.players, matchPlayer, 6) || value.players.length < 2) return false;
   const ids = new Set(value.players.map(player => player.id));
   const slots = new Set(value.players.map(player => player.slot));
   const result = value.result;
+  const perPlayer = dicePerPlayer(value.rules, value.players.length);
   const ranked = [...value.players].sort((left, right) => right.score - left.score);
   let expectedRank = 0;
   let priorScore: number | undefined;
@@ -276,18 +281,20 @@ function matchSetup(value: unknown): value is MatchSetup {
   }
   const highestScore = ranked[0]?.score ?? 0;
   const highestPlayers = ranked.filter(player => player.score === highestScore).map(player => player.id);
-  return ids.size === value.players.length && slots.size === value.players.length
+  return value.totalDice === totalStartingDice(value.rules, value.players.length)
+    && ids.size === value.players.length && slots.size === value.players.length
+    && value.players.every(player => player.diceCount <= perPlayer)
     && value.completedRows.length === new Set(value.completedRows).size
     && (result === null || result.winners.every(winner => ids.has(winner)))
     && (result === null || (result.highestScore === highestScore
-      && (result.status === 'won' ? result.highestScore >= 500 && result.winners.length === highestPlayers.length
-        && result.winners.every(winner => highestPlayers.includes(winner)) : result.highestScore < 500)))
+      && (result.status === 'won' ? result.highestScore >= value.rules.victoryPoints && result.winners.length === highestPlayers.length
+        && result.winners.every(winner => highestPlayers.includes(winner)) : result.highestScore < value.rules.victoryPoints)))
     && value.players.reduce((total, player) => total + player.diceCount, value.unusedDiceCount + value.placedDiceCount) === value.totalDice;
 }
-function matchResult(value: unknown): value is MatchResult {
+function matchResult(value: unknown, victoryPoints = 500): value is MatchResult {
   return record(value) && (value.status === 'continue' || value.status === 'won') && int(value.highestScore, 0, Number.MAX_SAFE_INTEGER)
-    && listOf(value.winners, id, 6) && ((value.status === 'won' && value.highestScore >= 500 && value.winners.length > 0)
-      || (value.status === 'continue' && value.highestScore < 500 && value.winners.length === 0))
+    && listOf(value.winners, id, 6) && ((value.status === 'won' && value.highestScore >= victoryPoints && value.winners.length > 0)
+      || (value.status === 'continue' && value.highestScore < victoryPoints && value.winners.length === 0))
     && new Set(value.winners).size === value.winners.length;
 }
 function settlementRank(value: unknown): value is SettlementRank {

@@ -180,6 +180,152 @@ test('2〜6席の通常対戦の開始時に、30個のダイスと初期80点�
   }
 });
 
+test('6人で固定17個を選ぶと全員に102個から17個ずつ配り、共有ルールを配信する', async () => {
+  const room = new Room({ id: 'f17a0006', name: '固定配布' }, runtime, { mode: 'standard', countdownMs: 5 });
+  try {
+    const lobby = Array.from({ length: 6 }, () => new LobbyGuest());
+    lobby.forEach(peer => room.connectLobby(peer));
+    room.commandLobby(lobby[0]!.welcome.playerId, lobby[0]!, {
+      type: 'set-rules', rules: { victoryPoints: 1500, startingDice: 17 }, rulesRevision: 0,
+    });
+    lobby.forEach(peer => room.commandLobby(peer.welcome.playerId, peer, {
+      type: 'ready', ready: true, rulesRevision: 1,
+    }));
+    await delay(20);
+    const dice = lobby.map(() => new DiceGuest());
+    dice.forEach((peer, index) => room.connectDice(peer, { token: lobby[index]!.welcome.token }));
+    const welcome = dice[0]?.messages.find(message => message.type === 'welcome');
+    assert.ok(welcome?.type === 'welcome' && welcome.match);
+    assert.equal(welcome.match.totalDice, 102);
+    assert.equal(welcome.match.rules.victoryPoints, 1500);
+    assert.equal(welcome.match.rules.startingDice, 17);
+    assert.deepEqual(welcome.match.players.map(player => player.diceCount), Array(6).fill(17));
+    assert.equal(welcome.match.unusedDiceCount, 0);
+    const snapshot = room.snapshot();
+    assert.equal(snapshot.totalDice, 102);
+    assert.ok(snapshot.matchParticipants?.some(player => player.handDiceIds.includes('f17a0006-die-102')));
+  } finally { room.dispose(); }
+});
+
+test('2人の固定8個を使い切ると未完成盤面で再配布し、保存復元後も次ラウンドを開始する', async () => {
+  let seed = 200;
+  const timedRuntime: RoomRuntime = { ...runtime, createBoardSeed: () => seed++ };
+  const info = { id: 'f8a00002', name: '固定8個' };
+  const room = new Room(info, timedRuntime, { mode: 'standard', countdownMs: 5 });
+  let restored: Room | null = null;
+  try {
+    const lobby = [new LobbyGuest(), new LobbyGuest()];
+    lobby.forEach(peer => room.connectLobby(peer));
+    room.commandLobby(lobby[0]!.welcome.playerId, lobby[0]!, {
+      type: 'set-rules', rules: { victoryPoints: 2000, startingDice: 8 }, rulesRevision: 0,
+    });
+    lobby.forEach(peer => room.commandLobby(peer.welcome.playerId, peer, {
+      type: 'ready', ready: true, rulesRevision: 1,
+    }));
+    await delay(20);
+    const dice = lobby.map(() => new DiceGuest());
+    dice.forEach((peer, index) => room.connectDice(peer, { token: lobby[index]!.welcome.token }));
+    const definition = createGoalBoard(seed - 1);
+    let requestId = 0;
+
+    function stateFor(peer: DiceGuest) {
+      const current = [...peer.messages].reverse().find(message => message.type === 'state');
+      assert.ok(current?.type === 'state');
+      return current;
+    }
+
+    function nextTarget(placements: readonly { row: number; column: number; gem: string }[]) {
+      const occupied = new Set(placements.flatMap(placement => {
+        const row = definition.rows[placement.row];
+        const column = definition.columns[placement.column];
+        return row && column ? [cellKey({ rowId: row.id, columnId: column.id })] : [];
+      }));
+      for (const row of definition.rows) {
+        const cell = nextOpenCell(definition, occupied, row.id);
+        const gem = cell && requiredGemAt(definition, cell);
+        if (cell && gem) return { cell, gem };
+      }
+      return null;
+    }
+
+    function completeDiceRoll(playerId: string, peer: DiceGuest, kind: 'roll' | 'reroll') {
+      const before = stateFor(peer);
+      const rollRequest = kind === 'roll'
+        ? { type: 'roll' as const, requestId: `fixed-${++requestId}`, turnSequence: before.state.turnSequence }
+        : { type: 'reroll' as const, requestId: `fixed-${++requestId}`, turnSequence: before.state.turnSequence };
+      room.commandDice(playerId, peer, rollRequest);
+      const rolling = stateFor(peer);
+      assert.equal(rolling.state.phase, 'rolling');
+      assert.ok(rolling.roll);
+      const target = nextTarget(rolling.state.placements);
+      assert.ok(target);
+      const results = rolling.roll.latest.dice.map(die => ({ id: die.id, gem: target.gem, approximate: false }));
+      const frame: Frame = { ...rolling.roll.latest, phase: 'settled', seq: rolling.roll.latest.seq + 1,
+        dice: rolling.roll.latest.dice.map(die => ({ ...die, stopped: true })) };
+      assert.ok(completeRoll);
+      completeRoll(frame, results, 0, false);
+      room.commandDice(playerId, peer, { type: 'confirm', rollId: rolling.roll.id });
+      const placement = stateFor(peer);
+      assert.equal(placement.state.phase, 'placement');
+      const destination = nextTarget(placement.state.placements);
+      assert.ok(destination);
+      const die = placement.state.results.find(result => placement.state.remaining.includes(result.id) && result.gem === destination.gem);
+      assert.ok(die);
+      room.commandDice(playerId, peer, {
+        type: 'place', rollId: rolling.roll.id, dieId: die.id,
+        row: definition.rows.findIndex(row => row.id === destination.cell.rowId),
+        column: definition.columns.findIndex(column => column.id === destination.cell.columnId),
+        revision: placement.state.revision,
+      });
+    }
+
+    for (let turn = 0; turn < 6; turn += 1) {
+      const firstState = stateFor(dice[0]!);
+      if (firstState.state.turnId === null) break;
+      const playerId = firstState.state.turnId;
+      const peer = lobby[0]!.welcome.playerId === playerId ? dice[0]! : dice[1]!;
+      const readyState = stateFor(peer);
+      assert.equal(readyState.state.phase, 'ready');
+      completeDiceRoll(playerId, peer, 'roll');
+      let current = stateFor(peer);
+      while (current.state.turnId === playerId && current.state.phase === 'placement' && current.state.remaining.length) {
+        completeDiceRoll(playerId, peer, 'reroll');
+        current = stateFor(peer);
+      }
+    }
+
+    const waiting = stateFor(dice[1]!);
+    assert.equal(waiting.state.phase, 'ready');
+    assert.equal(waiting.state.turnId, null);
+    assert.equal(waiting.state.placements.length, 16, 'the 21-cell board remains unfinished');
+    assert.deepEqual(waiting.match?.players.map(player => player.diceCount), [0, 0]);
+    assert.equal(waiting.match?.totalDice, 30);
+    assert.equal(waiting.match?.unusedDiceCount, 14);
+    assert.equal(room.snapshot().pendingRound?.playerId, lobby[1]!.welcome.playerId);
+
+    const saved = room.snapshot();
+    room.dispose();
+    restored = Room.restore(info, timedRuntime, saved);
+    assert.ok(restored);
+    await delay(740);
+    const resumed = lobby.map((seat, index) => {
+      const peer = new DiceGuest();
+      restored?.connectDice(peer, { token: seat.welcome.token });
+      return index === 0 ? peer : peer;
+    });
+    const newRound = resumed[0]?.messages.find(message => message.type === 'welcome');
+    assert.ok(newRound?.type === 'welcome' && newRound.match);
+    assert.equal(newRound.match.roundNumber, 2);
+    assert.equal(newRound.match.rules.startingDice, 8);
+    assert.deepEqual(newRound.match.players.map(player => player.diceCount), [8, 8]);
+    assert.equal(newRound.match.unusedDiceCount, 14);
+    assert.equal(newRound.match.placedDiceCount, 0);
+  } finally {
+    room.dispose();
+    restored?.dispose();
+  }
+});
+
 test('保存した部屋状態から座席を復元し、未確定の物理ロールを取り消す', async () => {
   const info = { id: 'baddcafe', name: '復旧確認' };
   const room = new Room(info, runtime, { mode: 'standard', countdownMs: 5 });

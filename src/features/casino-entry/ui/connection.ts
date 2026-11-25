@@ -1,5 +1,6 @@
 import { parseJson, parseRoomId, parseRoomName, readServerMessage } from '../../../shared/contracts/casino-entry';
 import type { CasinoRoomInfo, ClientMessage, LobbyState, ServerMessage } from '../../../shared/contracts/casino-entry';
+import type { GameRules } from '../../../shared/contracts/game-rules';
 
 export interface ConnectionView {
   status: 'idle' | 'connecting' | 'online' | 'offline';
@@ -19,6 +20,7 @@ export interface CasinoRoomTransport {
   join(roomId: string): Promise<Admission>;
   restore(roomId?: string): Promise<Admission> | undefined;
   setReady(ready: boolean): void;
+  setRules(rules: GameRules, rulesRevision?: number): void;
   exit(): void;
   stop(): void;
 }
@@ -195,7 +197,17 @@ export class CasinoConnection implements CasinoRoomTransport {
   }
 
   setReady(ready: boolean) {
-    if (this.current.status === 'online' && this.current.lobby?.phase !== 'started') this.send({ type: 'ready', ready });
+    const lobby = this.current.lobby;
+    if (this.current.status === 'online' && lobby?.phase !== 'started' && lobby) {
+      this.send({ type: 'ready', ready, rulesRevision: lobby.rulesRevision });
+    }
+  }
+
+  setRules(rules: GameRules, rulesRevision?: number) {
+    const lobby = this.current.lobby;
+    if (this.current.status === 'online' && lobby?.phase === 'waiting' && lobby.hostId === this.current.playerId && lobby) {
+      this.send({ type: 'set-rules', rules, rulesRevision: rulesRevision ?? lobby.rulesRevision });
+    }
   }
 
   private syncClock() {
