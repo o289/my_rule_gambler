@@ -1,0 +1,122 @@
+name: Roll back STG Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_id:
+        description: Worker version ID from the immediately previous successful STG deployment
+        required: true
+        type: string
+      expected_current_version_id:
+        description: Currently active STG Worker version ID to guard against a stale rollback request
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stg-worker
+  cancel-in-progress: false
+
+jobs:
+  rollback:
+    if: github.ref == 'refs/heads/main'
+    name: Roll back STG Worker
+    runs-on: ubuntu-latest
+    environment: STG
+    steps:
+      - name: Check out workflow revision
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22.23.1
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate the previous STG version
+        id: previous
+        shell: bash
+        env:
+          TARGET_VERSION_ID: ${{ inputs.version_id }}
+          EXPECTED_CURRENT_VERSION_ID: ${{ inputs.expected_current_version_id }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if [[ ! "$TARGET_VERSION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "version_id must be a Worker version UUID" >&2
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_CURRENT_VERSION_ID" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+            echo "expected_current_version_id must be a Worker version UUID" >&2
+            exit 1
+          fi
+          CURRENT="$(npx --no-install wrangler deployments status --env stg --json)"
+          CURRENT_DEPLOYMENT_ID="$(jq -er '.id | strings | select(length > 0)' <<<"$CURRENT")"
+          CURRENT_VERSION_ID="$(jq -er 'if (.versions | length) == 1 and .versions[0].percentage == 100 then .versions[0].version_id | strings | select(length > 0) else error("STG must use one 100% Worker version") end' <<<"$CURRENT")"
+          if [[ "$TARGET_VERSION_ID" == "$CURRENT_VERSION_ID" ]]; then
+            echo "The requested version is already active" >&2
+            exit 1
+          fi
+          if [[ "$CURRENT_VERSION_ID" != "$EXPECTED_CURRENT_VERSION_ID" ]]; then
+            echo "The active STG version changed after the rollback request was prepared" >&2
+            exit 1
+          fi
+          HISTORY="$(npx --no-install wrangler deployments list --env stg --json)"
+          PREVIOUS_VERSION_ID="$(jq -er --arg current "$CURRENT_DEPLOYMENT_ID" 'map(select(.id != $current)) | last | if (.versions | length) == 1 and .versions[0].percentage == 100 then .versions[0].version_id | strings | select(length > 0) else error("The previous deployment must be one 100% Worker version") end' <<<"$HISTORY")"
+          if [[ "$TARGET_VERSION_ID" != "$PREVIOUS_VERSION_ID" ]]; then
+            echo "Only the immediately previous 100% STG deployment is allowed; inspect deployment history before retrying" >&2
+            exit 1
+          fi
+          echo "current_deployment_id=$CURRENT_DEPLOYMENT_ID" >> "$GITHUB_OUTPUT"
+          echo "current_version_id=$CURRENT_VERSION_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Roll back the STG Worker
+        shell: bash
+        env:
+          TARGET_VERSION_ID: ${{ inputs.version_id }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          npx --no-install wrangler rollback "$TARGET_VERSION_ID" --env stg --yes \
+            --durable-objects-code-update-mode immediate \
+            --message "STG rollback from ${GITHUB_SHA} (run ${GITHUB_RUN_ID})"
+
+      - name: Verify rollback and record version
+        shell: bash
+        env:
+          TARGET_VERSION_ID: ${{ inputs.version_id }}
+          BEFORE_VERSION_ID: ${{ steps.previous.outputs.current_version_id }}
+          STG_HOSTNAME: ${{ vars.STG_HOSTNAME }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          STATUS="$(npx --no-install wrangler deployments status --env stg --json)"
+          DEPLOYMENT_ID="$(jq -er '.id | strings | select(length > 0)' <<<"$STATUS")"
+          ACTIVE_VERSION_ID="$(jq -er 'if (.versions | length) == 1 and .versions[0].percentage == 100 then .versions[0].version_id | strings | select(length > 0) else error("STG is not on a single 100% Worker version") end' <<<"$STATUS")"
+          if [[ "$ACTIVE_VERSION_ID" != "$TARGET_VERSION_ID" ]]; then
+            echo "The requested Worker version is not serving 100% of STG traffic" >&2
+            exit 1
+          fi
+          if [[ ! "$STG_HOSTNAME" =~ ^[A-Za-z0-9.-]+$ ]]; then
+            echo "STG_HOSTNAME is missing or invalid" >&2
+            exit 1
+          fi
+          curl --fail --silent --show-error --retry 5 --retry-delay 2 --retry-all-errors \
+            "https://${STG_HOSTNAME}/" --output /dev/null
+          {
+            printf '%s\n' '### STG rollback succeeded'
+            printf -- '- Worker: `%s`\n' 'gambler-stg'
+            printf -- '- Target version: `%s` (100%% traffic)\n' "$ACTIVE_VERSION_ID"
+            printf -- '- Replaced version: `%s`\n' "$BEFORE_VERSION_ID"
+            printf -- '- New deployment ID: `%s`\n' "$DEPLOYMENT_ID"
+            printf -- '- Workflow commit: `%s`\n' "$GITHUB_SHA"
+            printf -- '- HTTPS: `%s`\n' "https://${STG_HOSTNAME}/"
+            printf -- '- Run: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID"
+          } >> "$GITHUB_STEP_SUMMARY"
