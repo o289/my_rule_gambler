@@ -10,7 +10,7 @@ class MemoryStorage {
   get size() { return this.values.size; }
 }
 
-test('GameRoomObject refuses a second metadata reservation for the same ID', async () => {
+test('GameRoomObjectは同じIDの部屋情報の二重予約を拒む', async () => {
   const storage = new MemoryStorage();
   const object = new GameRoomObject({ storage, blockConcurrencyWhile: callback => callback() });
   const request = () => new Request('https://room.internal/__create', {
@@ -21,7 +21,7 @@ test('GameRoomObject refuses a second metadata reservation for the same ID', asy
   assert.equal((await object.fetch(request())).status, 409);
 });
 
-test('GameRoomObject completes a pending dissolution before serving the old ID', async () => {
+test('GameRoomObjectは旧IDへの応答前に中断された解散を完了する', async () => {
   const storage = new MemoryStorage();
   await storage.put('room', { id: 'a1b2c3d4', name: 'test room' });
   await storage.put('room-state', { version: 1 });
@@ -32,7 +32,7 @@ test('GameRoomObject completes a pending dissolution before serving the old ID',
   assert.equal(storage.size, 0, 'the retry removes metadata, status, and snapshots together');
 });
 
-test('GameRoomObject keeps reading legacy rooms that have metadata but no saved game snapshot', async () => {
+test('GameRoomObjectは保存されたゲーム状態がなく部屋情報だけある旧形式を読み込める', async () => {
   const storage = new MemoryStorage();
   await storage.put('room', { id: 'a1b2c3d4', name: 'legacy room' });
   const object = new GameRoomObject({ storage, blockConcurrencyWhile: callback => callback() });
@@ -41,7 +41,7 @@ test('GameRoomObject keeps reading legacy rooms that have metadata but no saved 
   assert.equal(storage.size, 1, 'a read-only compatibility check does not rewrite legacy data');
 });
 
-test('GameRoomObject blocks unknown snapshot versions instead of silently resetting the match', async () => {
+test('GameRoomObjectは未知の保存形式を拒み、対戦状態を保つ', async () => {
   const storage = new MemoryStorage();
   const unknownSnapshot = { version: 2, marker: 'must remain intact' };
   await storage.put('room', { id: 'a1b2c3d4', name: 'newer snapshot' });

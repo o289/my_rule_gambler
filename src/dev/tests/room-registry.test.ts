@@ -47,7 +47,7 @@ class DiceGuest implements DicePeer {
   send(message: DiceMessage) { assert.ok(readServerMessage(parseJson(JSON.stringify(message)))); this.messages.push(message); return true; }
 }
 
-test('one registry Room carries the frozen lobby seats into the dice connection', async () => {
+test('待機室で確定した席を同じ部屋オブジェクトのダイス接続に引き継ぐ', async () => {
   const registry = new RoomRegistry(runtime, 15);
   try {
     const room = registry.create({ id: 'a1b2c3d4', name: 'テスト卓' });
@@ -145,7 +145,7 @@ test('one registry Room carries the frozen lobby seats into the dice connection'
   } finally { registry.dispose(); }
 });
 
-test('standard startup allocates thirty dice and eighty points exactly once for two to six seats', async () => {
+test('2〜6席の通常対戦の開始時に、30個のダイスと初期80点を一度だけ割り当てる', async () => {
   const dicePerPlayer = [0, 0, 15, 10, 7, 6, 5];
   for (let count = 2; count <= 6; count += 1) {
     const registry = new RoomRegistry(runtime, 5);
@@ -180,7 +180,7 @@ test('standard startup allocates thirty dice and eighty points exactly once for 
   }
 });
 
-test('room snapshot reopens the seat and rolls back an unconfirmed physical result', async () => {
+test('保存した部屋状態から座席を復元し、未確定の物理ロールを取り消す', async () => {
   const info = { id: 'baddcafe', name: '復旧確認' };
   const room = new Room(info, runtime, { mode: 'standard', countdownMs: 5 });
   const lobby = [new LobbyGuest(), new LobbyGuest()];
@@ -234,7 +234,7 @@ test('room snapshot reopens the seat and rolls back an unconfirmed physical resu
   assert.equal(afterExpiry.info.id, info.id, 'expiring a seat keeps the room metadata intact');
 });
 
-test('preview rooms are isolated from reserved eight-hex gameplay rooms', () => {
+test('プレビュー用の部屋を対戦用の16進数8桁の部屋IDから分離する', () => {
   const registry = new RoomRegistry(runtime);
   try {
     const preview = registry.createPreview('table-a');
@@ -249,7 +249,7 @@ test('preview rooms are isolated from reserved eight-hex gameplay rooms', () => 
   } finally { registry.dispose(); }
 });
 
-test('standard turns hand off after the last used die and after a confirmed roll has no legal cell', async () => {
+test('通常対戦では最後の出目を使い切った場合と、確定後に配置先がない場合に手番を渡す', async () => {
   const definition = createGoalBoard(17);
   const firstCells = definition.rows.flatMap((row, rowIndex) => {
     const cell = nextOpenCell(definition, new Set<string>(), row.id);
@@ -381,7 +381,7 @@ test('standard turns hand off after the last used die and after a confirmed roll
   } finally { noMoveRegistry.dispose(); }
 });
 
-test('a completed sub-500 board publishes its settlement then starts a fresh round from all thirty dice', async () => {
+test('最高得点が500点未満で盤面が埋まったら得失点を通知し、全30個のダイスで次のラウンドを始める', async () => {
   const registry = new RoomRegistry(runtime, 5);
   try {
     const room = registry.create({ id: 'f011b0a2', name: '完成盤面' });
@@ -484,7 +484,7 @@ test('a completed sub-500 board publishes its settlement then starts a fresh rou
   } finally { registry.dispose(); }
 });
 
-test('a four-player completed board redeals seven dice each, leaves two unused, and preserves scores', async () => {
+test('4人対戦で盤面が埋まったら各7個を再配布し、残り2個を未使用にして得点を引き継ぐ', async () => {
   const registry = new RoomRegistry(runtime, 5);
   try {
     const room = registry.create({ id: '4d1ce004', name: '4人再配分' });
@@ -562,7 +562,7 @@ test('a four-player completed board redeals seven dice each, leaves two unused, 
   } finally { registry.dispose(); }
 });
 
-test('reaching 500 ends the match and players can return individually before a fresh match', async () => {
+test('500点に達すると対戦が終了し、各自で待機室に戻ってから新しい対戦を始められる', async () => {
   const registry = new RoomRegistry(runtime, 5);
   try {
     const room = registry.create({ id: 'c0ffee22', name: '終局と再接続' });

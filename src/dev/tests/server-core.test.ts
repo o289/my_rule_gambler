@@ -26,7 +26,7 @@ import {
 } from '../../platform/server/core/lobby';
 import { availableSeatSlot, reconnectGraceExpired, roomGraceExpired } from '../../platform/server/core/participant-lifecycle';
 
-test('lobby countdown is generation-checked, waits for its deadline, and freezes eligible seats once', () => {
+test('対象のカウントダウンを識別して開始時刻まで待ち、対象の席を一度だけ確定する', () => {
   const players = [
     { id: 'late-seat', name: 'B', slot: 1, online: true, ready: false },
     { id: 'first-seat', name: 'A', slot: 0, online: true, ready: true },
@@ -49,7 +49,7 @@ test('lobby countdown is generation-checked, waits for its deadline, and freezes
   assert.equal(scheduleLobbyCountdown(canceled, [...updated, { ...updated[0]!, id: 'not-ready', ready: false }], 2_000, 3_000), canceled);
 });
 
-test('shared participant lifecycle uses exact grace boundaries and lowest free seat', () => {
+test('共通の参加者管理は猶予期間の境界を守り、空いている最小の席番号を使う', () => {
   assert.equal(availableSeatSlot([{ slot: 0 }, { slot: 2 }], 4), 1);
   assert.equal(availableSeatSlot([{ slot: 0 }, { slot: 1 }], 2), null);
   assert.equal(reconnectGraceExpired(null, 90_000, 90_000), false);
@@ -58,7 +58,7 @@ test('shared participant lifecycle uses exact grace boundaries and lowest free s
   assert.equal(roomGraceExpired(1_000, 91_000, 90_000), true);
 });
 
-test('dice rules authorize rolls and update confirm, placement, and turn as one immutable state', () => {
+test('ダイスの振り出しを許可し、確定・配置・手番を既存の状態を変更せずに更新する', () => {
   const board: BoardDefinition = {
     rows: [{ id: 'row', score: 10 }],
     columns: [{ id: 'left', gem: 'ruby' }, { id: 'right', gem: 'sapphire' }],
@@ -100,7 +100,7 @@ test('dice rules authorize rolls and update confirm, placement, and turn as one 
   assert.deepEqual(ended.remaining, []);
 });
 
-test('standard turn sequence skips empty hands and auto-ends a confirmed roll with no legal placement', () => {
+test('通常対戦ではダイスのない手番を飛ばし、確定後に配置先がなければ自動終了する', () => {
   const board: BoardDefinition = {
     rows: [{ id: 'only', score: 10, goalColumnId: 'ruby', cells: { ruby: { requiredGem: 'ruby' } } }],
     columns: [{ id: 'ruby', gem: 'ruby' }],
@@ -124,7 +124,7 @@ test('standard turn sequence skips empty hands and auto-ends a confirmed roll wi
   assert.deepEqual(ended.results, []);
 });
 
-test('standard turn ends after the last die in the current roll and reroll keeps only unplaced IDs', () => {
+test('現在の出目を使い切ると通常の手番が終わり、振り直しには未配置のIDだけが残る', () => {
   const board: BoardDefinition = {
     rows: [{ id: 'row', score: 10 }],
     columns: [{ id: 'left', gem: 'ruby' }, { id: 'right', gem: 'sapphire' }],
@@ -158,7 +158,7 @@ test('standard turn ends after the last die in the current roll and reroll keeps
   assert.deepEqual(next.remaining, []);
 });
 
-test('fixed-step roll engine caps catch-up and sends the final settled frame after periodic captures', () => {
+test('固定間隔の物理演算は遅延を取り戻す回数を制限し、途中経過と最後の停止フレームを送る', () => {
   const physics = {
     dt: 1 / 120,
     steps: 0,

@@ -6,7 +6,7 @@ import { confirmedPlacement, placementCandidates } from '../../features/dice/mod
 import { DEFAULT_CONFIG } from '../../shared/contracts/dice';
 import type { GameState } from '../../shared/contracts/dice';
 
-test('every playable cell can receive placement feedback, including non-goals and the last column', () => {
+test('得点以外のマスや最終列も含め、配置可能なすべてのマスで配置演出を出せる', () => {
   const board = createGoalBoard(18);
   const occupied = new Map(initialState(board).occupied);
   const before: GameState = {
@@ -36,7 +36,7 @@ test('every playable cell can receive placement feedback, including non-goals an
   assert.equal(state.placements.length, 21);
 });
 
-test('a gem highlights matching candidates in multiple rows, skipping blocked and filled cells', () => {
+test('選んだ宝石に合う候補を複数の行で強調し、配置不可マスと埋まったマスを除く', () => {
   const board = {
     columns: [{ id: 'left', gem: 'ruby' }, { id: 'right', gem: 'ruby' }],
     rows: [

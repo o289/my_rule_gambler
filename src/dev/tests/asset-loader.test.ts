@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { createAssetLoader } from '../../features/casino-entry/ui/asset-loader';
 import type { AssetProgress } from '../../features/casino-entry/ui/asset-loader';
 
-test('the progress count only advances on real completions and retries only failed tasks', async () => {
+test('実際に読み込みが完了したときだけ進捗が進み、失敗した処理だけを再試行する', async () => {
   let doorLoads = 0;
   let loungeLoads = 0;
   let finishDoor = () => {};

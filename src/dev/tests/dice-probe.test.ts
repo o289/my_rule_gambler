@@ -422,7 +422,7 @@ async function verifyRoomAdmission(endpoint: string, pageUrl: URL) {
   }
 }
 
-test('STG dice probe streams matching physics frames and results to two clients in separate rooms', { timeout: 45_000 }, async () => {
+test('STGのダイス検証用サーバーは別々の部屋の2クライアントに一致する物理フレームと出目を配信する', { timeout: 45_000 }, async () => {
   const stgEndpoint = process.env.STG_DICE_PROBE_URL?.trim() || undefined;
   if (stgEndpoint) {
     const url = new URL(stgEndpoint);

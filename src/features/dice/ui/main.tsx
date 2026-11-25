@@ -282,7 +282,6 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   }, [connection, audio]);
   const dismissRoll = useCallback((id: string) => connection.dismissConfirmedRoll(id), [connection]);
 
-  const seat = game?.seats.find(item => item.id === info.playerId);
   const waitingForBoard = Boolean(boardAdapter.requiresServerBoard && game?.boardSeed === undefined);
   const bankSettlement = stage?.kind === 'bank' && settlement && settlementSnapshot
     ? { event: settlement, player: settlementSnapshot.player } : null;
@@ -300,7 +299,9 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
       <div className="salon-mark"><span aria-hidden="true">◇</span>ATELIER NOIR</div>
       <span className="room-chip" lang="en">{connection.room.toUpperCase()}</span>
     </header>
-    <div className="salon-title"><h1>宝石サイコロ 3D</h1><span role="status">{seat?.name ?? (info.status === 'offline' ? '再接続中' : '接続中')} {seat && (own ? '・あなたの手番' : current ? `・${current.name} の手番` : '')}</span></div>
+    {info.status !== 'online' && <p className="dice-connection-status" role="status">
+      {info.status === 'offline' ? '再接続中' : '接続中'}
+    </p>}
     {showTurnChange && current && game && <section key={game.turnSequence} className="turn-change-gate" aria-label="手番の案内">
       <TurnAnnouncement key={game.turnSequence} player={{ playerName: current.name, isLocal: own }} pulse />
     </section>}

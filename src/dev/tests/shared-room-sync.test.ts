@@ -67,7 +67,7 @@ class DiceClient {
   }
 }
 
-test('normal startup routes casino and dice sockets to the same Room and rejects unknown gameplay IDs', { timeout: 12_000 }, async () => {
+test('通常起動ではカジノとダイスの接続を同じ部屋につなぎ、未知の対戦IDを拒む', { timeout: 12_000 }, async () => {
   const servers = await startLocalDemoServers({ dicePort: 0, casinoPort: 0, allowDev: true, countdownMs: 35 });
   const sockets: WebSocket[] = [];
   try {

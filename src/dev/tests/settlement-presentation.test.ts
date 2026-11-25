@@ -35,7 +35,7 @@ function event(points: number, overrides: Partial<MatchSettlementEvent> = {}): M
   };
 }
 
-test('settlement bonus uses the actual all-player ranks, including unchanged scorer and tied ranks', () => {
+test('得点ボーナスは得点者の順位が変わらない場合や同順位を含め、全員の実際の順位を使う', () => {
   const otherMoves = event(20, {
     beforeRanks: [
       { id: 'p1', name: '同じ名前', rank: 1 }, { id: 'p2', name: '同じ名前', rank: 1 }, { id: 'p3', name: '三人目', rank: 3 },
@@ -77,7 +77,7 @@ test('settlement bonus uses the actual all-player ranks, including unchanged sco
   })), undefined);
 });
 
-test('score coin flights move exactly the committed amount without changing the wallet snapshot', () => {
+test('コイン演出は確定した額を移動させ、財布の保存状態は変更しない', () => {
   const loss = settlementCoinMoves('room-event', -10);
   assert.equal(loss.outgoing.reduce((sum, coin) => sum + coin.value, 0), 10);
   assert.deepEqual(loss.incoming, []);
@@ -91,7 +91,7 @@ test('score coin flights move exactly the committed amount without changing the 
   assert.equal(zeroBalanceLoss.points, 0, 'the score event keeps a zero actual payment distinct from its negative row value');
 });
 
-test('live settlement plays placement, score and bank before rank change or victory', () => {
+test('対戦中は配置・得点・バンクの後に順位変動または勝利を再生する', () => {
   const steps = (value: MatchSettlementEvent) => settlementStages(value, board).map(stage => stage.kind === 'effect' ? stage.request.kind : stage.kind);
   assert.deepEqual(steps(event(100)), ['placement', 'score', 'BIG_WIN', 'bank', 'COMEBACK']);
   assert.deepEqual(steps(event(-10)), ['placement', 'score', 'bank', 'COMEBACK']);
@@ -101,7 +101,7 @@ test('live settlement plays placement, score and bank before rank change or vict
   assert.deepEqual(steps(event(50, { beforeRanks: ranks })), ['placement', 'score', 'bank']);
 });
 
-test('a newer roll waits behind score presentation, then final results take over', () => {
+test('新しい投擲は得点演出の後まで待ち、その後は最終結果が優先される', () => {
   const input = { settlementPending: false, settlementRollId: null, resultReady: false, rollReady: false, rollId: null };
   assert.equal(dicePresentationMode({ ...input, settlementPending: true, settlementRollId: 'scoring', rollReady: true, rollId: 'newer' }), 'settlement');
   assert.equal(dicePresentationMode({ ...input, settlementPending: true, settlementRollId: 'scoring', rollReady: true, rollId: 'scoring' }), 'roll',
@@ -111,7 +111,7 @@ test('a newer roll waits behind score presentation, then final results take over
   assert.equal(dicePresentationMode(input), 'board');
 });
 
-test('bank playback reconstructs the scoring player balance and transfers only the confirmed points', () => {
+test('バンクは得点者の残高を再現し、確定した得失点だけを移動する', () => {
   for (const [scoreAfter, points] of [[90, -10], [0, -70], [130, 50]] as const) {
     const { wallet, reserve } = settlementPlaybackCoins(scoreAfter, points);
     const type = points < 0 ? 'withdraw' : 'deposit';
@@ -122,7 +122,7 @@ test('bank playback reconstructs the scoring player balance and transfers only t
   }
 });
 
-test('live dice stays in the main area until the result reveal and confirmation have both finished', () => {
+test('出目の表示と確定が終わるまで、ダイス投擲はメインエリアに残る', () => {
   const turn = { standard: true, complete: false, confirmed: false, own: true, reroll: false };
   assert.equal(rollPresentationAction(turn), 'wait');
   assert.equal(rollPresentationAction({ ...turn, confirmed: true, own: false }), 'wait');
@@ -133,7 +133,7 @@ test('live dice stays in the main area until the result reveal and confirmation 
   assert.equal(rollPresentationAction({ ...turn, complete: true, confirmed: true }), 'show-board');
 });
 
-test('settlement event queue suppresses duplicate receive and does not replay after reconnect baseline', () => {
+test('得失点通知を重複処理せず、再接続時に受け取った基準状態から過去の演出を再生しない', () => {
   const queue = new SettlementEventQueue();
   const committed = event(-10, { rowPoints: -10 });
   assert.equal(queue.enqueue(committed), true);
@@ -149,7 +149,7 @@ test('settlement event queue suppresses duplicate receive and does not replay af
   assert.equal(queue.getSnapshot().length, 0, 'skipping an effect only acknowledges its presentation event');
 });
 
-test('an older snapshot from the same board cannot roll back newer score or placement state', () => {
+test('同じ盤面の古いスナップショットで新しい得点や配置を巻き戻さない', () => {
   const game = (boardSeed: number, revision: number): GameState => ({
     seats: [], turnId: null, turnSequence: 0, turnNotice: null, phase: 'ready', revision,
     config: { count: 5, hz: 120 }, boardSeed, placements: [], results: [], remaining: [],
@@ -162,7 +162,7 @@ test('an older snapshot from the same board cannot roll back newer score or plac
 });
 
 
-test('one-cell comeback hint points only to an actual legal final cell for a confirmed remaining die', () => {
+test('あと1マスで逆転の案内は、確定した未配置ダイスを合法的に置ける最後のマスだけを示す', () => {
   const occupied = new Set([cellKey({ rowId: 'row-a', columnId: 'first' })]);
   const players = [{ id: 'p1', score: 80 }, { id: 'p2', score: 100 }];
   const results = [{ id: 'die-1', gem: 'sapphire' as const, approximate: false }];

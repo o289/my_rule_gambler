@@ -48,7 +48,7 @@ class Client {
   }
 }
 
-test('server shares one simulation, resumes it, and authorizes CONFIRM and reroll exactly once', { timeout: 22_000 }, async () => {
+test('サーバーは1つの物理演算を共有して途中から再開し、出目確定と振り直しを各1回だけ受け付ける', { timeout: 22_000 }, async () => {
   const server = await startDiceServer({ port: 0, allowDev: true });
   try {
     const owner = new Client(server.port);
@@ -156,7 +156,7 @@ test('server shares one simulation, resumes it, and authorizes CONFIRM and rerol
 });
 
 
-test('a fresh dice room can roll with only one connected player', async () => {
+test('新しいダイス部屋では接続が1人でもダイスを振れる', async () => {
   const server = await startDiceServer({ port: 0, allowDev: false });
   try {
     const player = new Client(server.port);

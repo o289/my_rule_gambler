@@ -27,7 +27,7 @@ function deniedUpgrade(url: string, origin: string) {
   });
 }
 
-test('shared WebSocket transport preserves origin/path checks and recovers after invalid JSON', { timeout: 8000 }, async () => {
+test('共通のWebSocket接続は接続元とパスを検証し、不正なJSONの後も処理を続ける', { timeout: 8000 }, async () => {
   const server = await startCasinoServer({ port: 0 });
   const socket = new WebSocket(`ws://127.0.0.1:${server.port}/ws`, {
     headers: { origin: 'http://localhost:5179' },

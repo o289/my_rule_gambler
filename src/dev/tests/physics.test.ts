@@ -44,7 +44,7 @@ function contained(die: DiePose) {
   }
 }
 
-test('one through five rigid bodies finish inside the real tray at both rates with matching upper faces', () => {
+test('どちらの更新頻度でも1〜5個のダイスがトレイ内で止まり、上面と出目が一致する', () => {
   let dieContact = false;
   let wallContact = false;
   for (const hz of [120, 240] as const) {
@@ -82,7 +82,7 @@ test('one through five rigid bodies finish inside the real tray at both rates wi
   assert.ok(wallContact, 'Rapier reported at least one wall impact');
 });
 
-test('cocked dice get a bounded physical nudge and preserve the actual pose until physics advances', () => {
+test('斜めに止まったダイスに上限付きの力を加え、物理演算が進むまで現在の姿勢を保つ', () => {
   const diagonal: Quaternion = [0, 0, Math.sin(Math.PI / 8), Math.cos(Math.PI / 8)];
   const q = { x: diagonal[0], y: diagonal[1], z: diagonal[2], w: diagonal[3] };
   const world = new RAPIER.World({ x: 0, y: -19.8, z: 0 });

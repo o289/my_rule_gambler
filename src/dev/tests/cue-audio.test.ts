@@ -21,7 +21,7 @@ class SuspendedAudio {
   }
 }
 
-test('the first cue survives asynchronous resume and repeated gestures use the same attempt', async () => {
+test('音声の再開待ちでも最初の効果音が残り、操作を繰り返しても同じ再開処理を使う', async () => {
   const context = new SuspendedAudio();
   const audio = new CueAudio(() => context, () => 0);
   const played: number[] = [];
@@ -41,7 +41,7 @@ test('the first cue survives asynchronous resume and repeated gestures use the s
   assert.deepEqual(played, [context.currentTime, context.currentTime]);
 });
 
-test('cut discards pending cues in the same resume, including cues of a replaced animation', async () => {
+test('音声を止めると、差し替え前の演出も含めて再開待ちの効果音を取り消す', async () => {
   const context = new SuspendedAudio();
   const audio = new CueAudio(() => context, () => 0);
   const heard: string[] = [];
@@ -55,7 +55,7 @@ test('cut discards pending cues in the same resume, including cues of a replaced
   assert.deepEqual(heard, ['replacement']);
 });
 
-test('stale cues are discarded and a rejected or pending resume can be retried', async () => {
+test('古い効果音を破棄し、音声の再開が失敗または保留になっても再試行できる', async () => {
   const context = new SuspendedAudio();
   let now = 0;
   const audio = new CueAudio(() => context, () => now);
@@ -83,7 +83,7 @@ test('stale cues are discarded and a rejected or pending resume can be retried',
   assert.deepEqual(heard, ['new']);
 });
 
-test('missing or failed audio initialization leaves the caller free to continue', () => {
+test('音声の初期化が使えない場合や失敗した場合も呼び出し元の処理は続く', () => {
   for (const initialize of [() => null, () => { throw new Error('Audio unavailable'); }]) {
     const audio = new CueAudio(initialize);
     assert.doesNotThrow(audio.unlock);

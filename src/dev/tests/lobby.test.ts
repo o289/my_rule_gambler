@@ -50,7 +50,7 @@ function ready(room: Room, guest: Guest, value = true) {
   room.commandLobby(guest.welcome.playerId, guest, { type: 'ready', ready: value });
 }
 
-test('only all-ready groups of two to six start, with a shared deadline and unique stable slots', async () => {
+test('2〜6人全員の準備が揃うと、共通の開始時刻と重複しない固定の席で開始する', async () => {
   for (let count = MIN_PLAYERS; count <= MAX_PLAYERS; count += 1) {
     const room = new Room(roomInfo, runtime, { mode: 'standard', countdownMs });
     try {
@@ -93,7 +93,7 @@ test('only all-ready groups of two to six start, with a shared deadline and uniq
   }
 });
 
-test('starting is blocked alone and cancelled by participation changes, with stable reconnect identity', async () => {
+test('1人では開始できず、参加状況の変更で開始を取り消し、再接続しても参加者の識別子を保つ', async () => {
   const room = new Room(roomInfo, runtime, { mode: 'standard', countdownMs });
   try {
     const a = join(room);
@@ -142,7 +142,7 @@ test('starting is blocked alone and cancelled by participation changes, with sta
   } finally { room.dispose(); }
 });
 
-test('an unready departure while waiting automatically starts an eligible group', async () => {
+test('待機中に準備前の参加者が退出し、残りが条件を満たすと自動で開始する', async () => {
   const room = new Room(roomInfo, runtime, { mode: 'standard', countdownMs });
   try {
     const first = join(room);
@@ -158,14 +158,14 @@ test('an unready departure while waiting automatically starts an eligible group'
   } finally { room.dispose(); }
 });
 
-test('READY packets accept explicit booleans only', () => {
+test('準備状態のメッセージは真偽値だけを受け付ける', () => {
   assert.deepEqual(readClientMessage({ type: 'ready', ready: false }), { type: 'ready', ready: false });
   assert.equal(readClientMessage({ type: 'ready', ready: 1 }), null);
   assert.equal(readClientMessage({ type: 'ready' }), null);
   assert.equal(readClientMessage({ type: 'clock', sentAt: -1 }), null);
 });
 
-test('room entry packets distinguish creating a named room from looking up an ID', () => {
+test('部屋に入るメッセージは名前付きの部屋作成とIDによる検索を区別する', () => {
   assert.deepEqual(readClientMessage({ type: 'create', name: '  夜のサロン  ' }), { type: 'create', name: '夜のサロン' });
   assert.equal(readClientMessage({ type: 'create', name: ' ' }), null);
   assert.equal(readClientMessage({ type: 'create', name: 'table\u0007' }), null);

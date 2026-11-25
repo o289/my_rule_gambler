@@ -48,7 +48,7 @@ class Client {
   }
 }
 
-test('the independent casino server starts two clients from the same deadline and restores their lobby', { timeout: 18_000 }, async () => {
+test('独立したカジノサーバーは2人を同じ時刻に開始させ、待機室を復元する', { timeout: 18_000 }, async () => {
   const server = await startCasinoServer({ port: 0 });
   try {
     const host = new Client(server.port);
@@ -131,7 +131,7 @@ test('the independent casino server starts two clients from the same deadline an
   } finally { server.close(); }
 });
 
-test('only creation allocates a room and denied joins leave its seat list intact', { timeout: 5_000 }, async () => {
+test('作成時だけ部屋を確保し、参加を拒まれても座席一覧は変わらない', { timeout: 5_000 }, async () => {
   const server = await startCasinoServer({ port: 0 });
   try {
     const invalid = new Client(server.port);

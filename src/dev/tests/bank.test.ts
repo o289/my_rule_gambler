@@ -38,7 +38,7 @@ function fixture(wallet = DEMO_WALLET, reserve = DEMO_RESERVE) {
   return { bank, advance, timers };
 }
 
-test('both inventories provide exact minimum-coin combinations for demo amounts', () => {
+test('プレイヤーと金庫の在庫から、デモ金額ちょうどの支払いを最少枚数で組み立てる', () => {
   for (const wallet of [DEMO_WALLET, DEMO_RESERVE]) {
     for (const [amount, values] of [[100, [100]], [150, [100, 50]], [70, [50, 10, 10]]] as const) {
       const first = selectPayment(wallet, amount);
@@ -60,7 +60,7 @@ test('both inventories provide exact minimum-coin combinations for demo amounts'
   assert.deepEqual(selectPayment(onlyFifties, 50).map(coin => coin.id), ['a']);
 });
 
-test('the API validates amounts and updates the ledger only when each coin lands', () => {
+test('取引金額を検証し、コインが到着するたびに帳簿を更新する', () => {
   const { bank, advance } = fixture();
   for (const bad of [0, -10, 15, 12.5, Infinity, NaN, '100']) {
     assert.throws(() => readBankTransaction({ ...transaction('withdraw', 0), amount: bad }, DEMO_PLAYER.id), /10点単位/);
@@ -95,7 +95,7 @@ test('the API validates amounts and updates the ledger only when each coin lands
   assert.equal(bank.getSnapshot().balance, 500);
 });
 
-test('skipping after an arrival, replaying, and switching direction keep coin IDs and balances consistent', () => {
+test('到着後のスキップ・再生・入出金切り替えでもコインIDと残高を保つ', () => {
   const { bank, advance, timers } = fixture();
   assert.ok(bank.play(transaction('deposit', 150), true));
   advance(905);
@@ -123,7 +123,7 @@ test('skipping after an arrival, replaying, and switching direction keep coin ID
 
 const withChange = { ...transaction('withdraw', 70), tender: 100 } as const;
 
-test('a 100-point payment reserves only existing bank coins for exact change', () => {
+test('100点の支払いでは金庫にあるコインだけをお釣りとして確保する', () => {
   const { payment, change } = selectExchange(DEMO_WALLET, DEMO_RESERVE, withChange);
   assert.deepEqual(payment.map(coin => coin.value), [100]);
   assert.deepEqual(change.map(coin => coin.value), [10, 10, 10]);
@@ -141,7 +141,7 @@ test('a 100-point payment reserves only existing bank coins for exact change', (
   assert.throws(() => shortBank.play({ ...withChange, type: 'deposit' }, false), /支払いに使う金貨/);
 });
 
-test('change starts after the outgoing coin lands and returns 10 points at each landing', () => {
+test('支払いのコイン到着後にお釣りが動き出し、到着ごとに10点を返す', () => {
   const { bank, advance } = fixture();
   assert.ok(bank.play(withChange, false));
   const run = bank.getSnapshot().run;
@@ -179,7 +179,7 @@ test('change starts after the outgoing coin lands and returns 10 points at each 
   assert.equal(bank.getSnapshot().balance, 200);
 });
 
-test('coin compression preserves points, reserves, and remainder through both denominations and replay', () => {
+test('両方の額面でコインをまとめ直して再生しても得点・予備・端数が保たれる', () => {
   const extra: Coin = { id: 'tenth-remainder', value: 10 };
   const reserve = [...DEMO_RESERVE, { id: 'compressed-1', value: 100 } as const];
   const { bank, advance } = fixture([...DEMO_WALLET, extra], reserve);
@@ -211,7 +211,7 @@ test('coin compression preserves points, reserves, and remainder through both de
   assert.ok(bank.getSnapshot().wallet.includes(extra));
 });
 
-test('skip and mode switching cannot double-return or double-compress change', () => {
+test('スキップや入出金切り替えでお釣りを二重に返したりまとめたりしない', () => {
   const { bank, advance, timers } = fixture();
   assert.ok(bank.play(withChange, true));
   const run = bank.getSnapshot().run;

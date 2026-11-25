@@ -30,7 +30,6 @@ export default function ResultPreview() {
       <div className="salon-mark"><span aria-hidden="true">◇</span>ATELIER NOIR</div>
       <span className="room-chip">{room.id}</span>
     </header>
-    <div className="salon-title"><h1>宝石サイコロ 3D</h1><span>PLAYER 1</span></div>
     <FinalResults players={players} winners={[playerId]} onReturn={setReady} />
   </main>;
 }

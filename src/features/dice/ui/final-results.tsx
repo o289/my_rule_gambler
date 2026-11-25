@@ -12,7 +12,7 @@ export function FinalResults({ players, winners, pending = false, connected = tr
   const winnerNames = winners.map(id => players.find(player => player.id === id)?.name ?? id).join('、');
 
   return <section className="final-results-screen" aria-labelledby="final-results-title">
-    <h2 id="final-results-title">最終結果</h2>
+    <h1 id="final-results-title">最終結果</h1>
     <ol aria-label="最終順位">
       {ranking.map(player => <li key={player.id}>
         <span>{player.rank}位</span><span>{player.name}</span><strong>{player.score}点</strong>

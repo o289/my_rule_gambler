@@ -6,7 +6,7 @@ import {
 import type { BoardDefinition } from '../../features/board/model/board-model';
 import { createGoalBoard } from '../../features/board/model/goal-layout';
 
-test('the same seed produces stable goals, with six row lengths and increasing default scores', () => {
+test('同じシードで、6種類の行の長さと段階的に上がる既定の得点を持つ同じ盤面を作る', () => {
   const layouts = new Set<string>();
   for (const seed of [0, 1, 2, 74, 9010, 0xffff_ffff]) {
     const board = createGoalBoard(seed);
@@ -28,7 +28,7 @@ test('the same seed produces stable goals, with six row lengths and increasing d
   assert.ok(layouts.size > 1);
 });
 
-test('goals, skipped blocked cells and designated gems work with both current and legacy rows', () => {
+test('現行形式と旧形式の行で、得点マス・配置不可マス・指定宝石を扱える', () => {
   const board: BoardDefinition = {
     columns: [
       { id: 'first', gem: 'ruby' },

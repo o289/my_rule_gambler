@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { dealRoundDice } from '../../platform/server/core/dice-round';
 
-test('round redeal assigns every unique die in seat order and leaves four-player extras unused', () => {
+test('ラウンドの再配布ではダイスを重複なく席順に配り、4人対戦の余りは未使用にする', () => {
   const ids = Array.from({ length: 30 }, (_, index) => `die-${String(index + 1).padStart(2, '0')}`);
   const distribution = dealRoundDice(ids, 4);
   assert.ok(distribution);

@@ -7,7 +7,7 @@ function packet(rollId: string, seq: number, ms: number, phase: Frame['phase'] =
   return { rollId, seq, simMs: ms, phase, dice: [], hits: [] };
 }
 
-test('the render clock only advances, late frames are ignored, and the final sample uses the exact server pose', () => {
+test('描画時刻は前進し続け、遅れて届いたフレームは無視し、最後にサーバーの姿勢を正確に使う', () => {
   const buffer = new FrameStream();
   buffer.push(packet('one', 1, 100), 200);
   buffer.push(packet('one', 2, 116), 220);

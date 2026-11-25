@@ -1,41 +1,9 @@
-import { useLayoutEffect, useRef } from 'react';
+import { useRef } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { Coin, CoinValue } from '../model/bank-model';
 import type { BankSnapshot } from '../application/bank-player';
 import { GoldCoin } from './coin';
 import { CoinMerger } from './coin-compression';
-
-function Balance({ score, animate }: { score: number; animate: boolean }) {
-  const value = useRef<HTMLOutputElement>(null);
-  const shown = useRef(score);
-
-  useLayoutEffect(() => {
-    const element = value.current;
-    if (!element) return;
-    const start = shown.current;
-    if (!animate || start === score) {
-      element.value = String(score);
-      shown.current = score;
-      return;
-    }
-    let frame = 0;
-    const now = performance.now();
-    const duration = 258;
-    function update(time: number) {
-      if (!element) return;
-      const progress = Math.min(1, (time - now) / duration);
-      const number = Math.round(start + (score - start) * (1 - (1 - progress) ** 3));
-      shown.current = number;
-      element.value = String(number);
-      if (progress < 1) frame = requestAnimationFrame(update);
-    }
-    element.value = String(start);
-    frame = requestAnimationFrame(update);
-    return () => cancelAnimationFrame(frame);
-  }, [score, animate]);
-
-  return <output className="score-value" ref={value} aria-hidden="true">{score}</output>;
-}
 
 function CoinGroups({ wallet, renderCoin }: { wallet: readonly Coin[]; renderCoin: (coin: Coin) => ReactNode }) {
   const byValue = new Map<CoinValue, Coin[]>();
@@ -80,18 +48,11 @@ export function PlayerTray({ snapshot, playerName }: {
   const animateMerge = Boolean(gathering && !compression?.reduced && typeof Element.prototype.animate === 'function');
   const outgoing = run?.transaction.tender ?? run?.transaction.amount;
   return (
-    <section className="player-area" aria-label="プレイヤーの得点と所持コイン" data-paying={Boolean(run?.playing)} data-direction={mode} data-incoming={returning}>
-      <div className="wallet-score" data-balance={balance}>
-        <span className="player-name">{playerName}</span>
-        <div className="wallet-value">
-          <Balance score={balance} animate={Boolean(run?.playing && !run.reduced)} />
-          <span className="wallet-unit" aria-hidden="true">点</span>
-          <span className="sr-only" aria-live="polite">現在の得点 {balance}点</span>
-        </div>
-        {run?.playing && (returning
-          ? <strong className="payment-delta">お釣り ＋{outgoing === undefined ? 0 : outgoing - run.transaction.amount}点</strong>
-          : <strong className="payment-delta" lang="en">{deposit ? '+' : '−'}{outgoing} POINTS</strong>)}
-      </div>
+    <section className="player-area" aria-label={`${playerName}の所持コイン`} data-direction={mode} data-incoming={returning}>
+      <span className="sr-only" aria-live="polite">現在の得点 {balance}点</span>
+      {run?.playing && (returning
+        ? <strong className="payment-delta">お釣り ＋{outgoing === undefined ? 0 : outgoing - run.transaction.amount}点</strong>
+        : <strong className="payment-delta" lang="en">{deposit ? '+' : '−'}{outgoing} POINTS</strong>)}
       <div className="wallet-tray" ref={tray} data-compression={compression?.cue ?? 'idle'}>
         <CoinGroups wallet={wallet} renderCoin={coin => {
           const flying = Boolean(run && !run.reduced && run.flights.has(coin.id));

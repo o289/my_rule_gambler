@@ -23,7 +23,7 @@ function resultButtons(onReturn: (ready: boolean) => void, connected = true, pen
   }>[];
 }
 
-test('final result buttons request replay-ready or waiting-room states independently', () => {
+test('最終結果の各ボタンは再戦の準備完了または待機室への移動を個別に要求する', () => {
   const requested: boolean[] = [];
   const buttons = resultButtons(ready => requested.push(ready));
   assert.equal(buttons.length, 2);
@@ -36,7 +36,7 @@ test('final result buttons request replay-ready or waiting-room states independe
   assert.deepEqual(requested, [true, false]);
 });
 
-test('final result actions remain disabled until the result connection is live', () => {
+test('結果画面で未接続または移動処理中ならボタンを無効にする', () => {
   for (const state of [{ connected: false, pending: false }, { connected: true, pending: true }]) {
     const buttons = resultButtons(() => {}, state.connected, state.pending);
     assert.equal(buttons[0]?.props.disabled, true);

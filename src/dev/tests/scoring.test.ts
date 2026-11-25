@@ -29,7 +29,7 @@ function state(scores: readonly number[], completedRows: readonly string[] = [])
   return { players: scores.map((score, index) => player(`p${index + 1}`, score)), completedRows, result: null };
 }
 
-test('settlement applies only the newly completed goal once and caps a loss at the current balance', () => {
+test('新たに完成したマスだけを一度精算し、失点を現在の残高までに抑える', () => {
   const occupied = new Map([[cellKey({ rowId: 'bonus', columnId: 'ruby' }), { row: 0, column: 0 }]]);
   const first = settleCompletedRows(board, occupied, state([20, 80]), 'p1', 'bonus');
   assert.equal(first.players[0]?.score, 40);
@@ -51,7 +51,7 @@ test('settlement applies only the newly completed goal once and caps a loss at t
   assert.deepEqual(zeroBalanceLoss.completedRows, ['penalty'], 'a zero-payment loss is still settled once');
 });
 
-test('the first completed score to reach 500 ends a partially filled board', () => {
+test('盤面に空きがあっても得点が500点に達した時点で対戦を終了する', () => {
   const partial = new Map([[cellKey({ rowId: 'bonus', columnId: 'ruby' }), { row: 0, column: 0 }]]);
   const below500 = settleCompletedRows(board, partial, state([479, 480]), 'p1', 'bonus');
   assert.equal(below500.players[0]?.score, 499);
@@ -71,7 +71,7 @@ test('the first completed score to reach 500 ends a partially filled board', () 
     'no later placements can change the finished match');
 });
 
-test('an already level top score is recorded as tied if a settlement reaches the victory threshold', () => {
+test('精算で勝利点に達した首位が同点なら同率優勝として記録する', () => {
   const complete = new Set([cellKey({ rowId: 'bonus', columnId: 'ruby' })]);
   const tied = settleCompletedRows(board, complete, {
     ...state([500, 480, 400]),
@@ -80,7 +80,7 @@ test('an already level top score is recorded as tied if a settlement reaches the
   assert.deepEqual([...rankPlayers(tied.players).values()], [1, 1, 3]);
 });
 
-test('499 continues while 500 at board completion is a win', () => {
+test('盤面が埋まったときに最高499点なら続行し、500点なら勝利を確定する', () => {
   const occupied = new Map([
     [cellKey({ rowId: 'bonus', columnId: 'ruby' }), { row: 0, column: 0 }],
     [cellKey({ rowId: 'penalty', columnId: 'sapphire' }), { row: 1, column: 1 }],

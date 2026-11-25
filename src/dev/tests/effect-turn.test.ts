@@ -43,7 +43,7 @@ function playbackFixture() {
   return { player, advance, sounded };
 }
 
-test('the amethyst demo has one eligible empty +100 cell and the award makes a unique leader', () => {
+test('アメジストのデモには配置可能な空きの＋100点マスが1つあり、得点で単独首位になる', () => {
   const royal = COMEBACK_BOARD.rows.find(row => row.id === LAST_CELL.rowId);
   assert.equal(royal?.score, COMEBACK_SCORE);
   assert.equal(COMEBACK_SCORE, 100);
@@ -59,7 +59,7 @@ test('the amethyst demo has one eligible empty +100 cell and the award makes a u
   }
 });
 
-test('the observed roll stop fires once and placement precedes reuse of the COMEBACK cues', () => {
+test('ダイス停止を一度だけ通知し、配置後に逆転演出の音を再生する', () => {
   const { player, advance, sounded } = playbackFixture();
   const request = readEffect('ONE_CELL_COMEBACK', { gem: COMEBACK_GEM });
   const beats = beatsFor(request, false, EFFECT_PREVIEW_SCENARIO);
@@ -90,7 +90,7 @@ test('the observed roll stop fires once and placement precedes reuse of the COME
   assert.equal(player.getSnapshot()?.phase, 'finish');
 });
 
-test('a missed amethyst never places or activates COMEBACK, and a stale roll cannot affect a replacement', () => {
+test('アメジストが出ないと配置も逆転演出も始まらず、古い投擲が最新の投擲に干渉しない', () => {
   const { player, advance, sounded } = playbackFixture();
   const miss = readEffect('ONE_CELL_COMEBACK', { gem: 'sapphire' });
   player.play(miss, true);
@@ -113,7 +113,7 @@ test('a missed amethyst never places or activates COMEBACK, and a stale roll can
   assert.equal(player.getSnapshot(), null);
 });
 
-test('turn announcements use each viewer’s role and only run the entry cue once', () => {
+test('手番案内は見る人に応じた文言を使い、開始音を一度だけ鳴らす', () => {
   assert.equal(turnLabel({ playerName: 'PLAYER 1', isLocal: true }), 'あなたの手番');
   assert.equal(turnLabel({ playerName: 'PLAYER 2', isLocal: false }), 'PLAYER 2の手番');
   const { player, advance, sounded } = playbackFixture();
@@ -123,7 +123,7 @@ test('turn announcements use each viewer’s role and only run the entry cue onc
   assert.deepEqual(sounded.filter(([, cue]) => cue === 'start'), [['TURN_CHANGE', 'start']]);
 });
 
-test('the shared score effect formats an award, a capped payment, and no payment', () => {
+test('共通の得点演出は得点・残高を上限とする支払い・支払いなしを表示する', () => {
   const scenario = EFFECT_PREVIEW_SCENARIO;
   const penalty = { rowId: 'penalty', columnId: 'ruby' };
   const board = { ...SAMPLE_BOARD, rows: SAMPLE_BOARD.rows.map(row => row.id === penalty.rowId ? { ...row, score: -50 } : row) };
@@ -145,7 +145,7 @@ test('the shared score effect formats an award, a capped payment, and no payment
   assert.throws(() => readEffect('BOARD_SCORE', { ...score, target: scenario.featuredCell }, context), RangeError);
 });
 
-test('settlement queues big wins before rank changes and handles point and rank boundaries', () => {
+test('得失点と順位の境界条件を判定し、大当たり演出を順位変動演出より先に並べる', () => {
   const { BOARD_SCORE: score, COMEBACK: moved } = EFFECT_PREVIEW_SCENARIO.demo;
   const down = { ...moved, fromRank: 1, toRank: 2 };
   const unchanged = { ...moved, toRank: moved.fromRank };
@@ -162,7 +162,7 @@ test('settlement queues big wins before rank changes and handles point and rank 
   assert.throws(() => readEffect('BIG_WIN', { ...score, points: 99 }), RangeError);
 });
 
-test('the settlement player finishes or skips BIG WIN before COMEBACK and replays the sequence', () => {
+test('大当たり演出の終了またはスキップ後に逆転演出を流し、一連の再生をやり直せる', () => {
   const { player, advance, sounded } = playbackFixture();
   const { BOARD_SCORE: score, COMEBACK: rankChange } = EFFECT_PREVIEW_SCENARIO.demo;
   const effects = settlementEffects({ score, rankChange }).map(([kind, params]) => readEffect(kind, params));
