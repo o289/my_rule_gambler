@@ -1,13 +1,18 @@
 import { useAudioActivation } from '../../../shared/audio/use-audio-activation';
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import type { CSSProperties, RefObject } from 'react';
 import { MAX_PLAYERS, MIN_PLAYERS } from '../../../shared/contracts/casino-entry';
 import type { CasinoRoomInfo, Seat } from '../../../shared/contracts/casino-entry';
+import { DEFAULT_GAME_RULES, STARTING_DICE_OPTIONS, VICTORY_POINT_OPTIONS } from '../../../shared/contracts/game-rules';
+import type { GameRules } from '../../../shared/contracts/game-rules';
 import type { Admission, CasinoRoomTransport, ConnectionView } from './connection';
 import { CasinoDoors, DOOR_FALLBACK_MS, RoomDoor, ROOM_UNLOCK_MS } from './casino-doors';
 import { RoomChooser } from './room-chooser';
 import type { RoomAction, RoomProblem } from './room-chooser';
 import { casinoAssets, entranceGems } from './casino-assets';
 import { releaseDecodedImages } from './asset-loader';
+import { CrownIcon } from '../../players/ui/vip-icons';
+import '../../players/ui/style.css';
 import './casino.css';
 
 export type CasinoPhase =
@@ -72,10 +77,11 @@ function CountdownChip({ deadline, offset }: { deadline: number; offset: number 
   </div>;
 }
 
-export function VipLobby({ info, room, setReady, leave, blocked, deadline, enteringGame }: {
+export function VipLobby({ info, room, setReady, setRules, leave, blocked, deadline, enteringGame }: {
   info: ConnectionView;
   room: CasinoRoomInfo;
   setReady: (ready: boolean) => void;
+  setRules?: (rules: GameRules, rulesRevision: number) => void;
   leave: () => void;
   blocked: boolean;
   deadline: number | null;
@@ -86,6 +92,10 @@ export function VipLobby({ info, room, setReady, leave, blocked, deadline, enter
   const joined = lobby?.seats.filter(seat => seat.online) ?? [];
   const ready = joined.filter(seat => seat.ready).length;
   const mine = joined.find(seat => seat.id === playerId);
+  const canConfigureRules = Boolean(mine && mine.id === lobby?.hostId && lobby.phase === 'waiting' && setRules);
+  const showRulesButton = Boolean(lobby && lobby.phase === 'waiting' && ready < joined.length);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const rulesButton = useRef<HTMLButtonElement>(null);
   const message = problem || (status !== 'online' ? status === 'connecting' ? 'ルームに接続しています' : 'ルームへの再接続を待っています'
     : enteringGame ? '対戦を読み込んでいます…'
       : lobby?.phase === 'started' ? 'このルームの対戦はすでに始まっています'
@@ -110,7 +120,11 @@ export function VipLobby({ info, room, setReady, leave, blocked, deadline, enter
           <div className="vip-felt">
             {deadline !== null
               ? <CountdownChip key={deadline} deadline={deadline} offset={clockOffset} />
-              : <div className="vip-table-mark"><Crest className="table-crown" /><span>GAMBLER</span></div>}
+              : <div className="vip-table-mark"><Crest className="table-crown" /><span>GAMBLER</span>
+                {(showRulesButton || rulesOpen) && <button ref={rulesButton} type="button" className="vip-table-rules" aria-haspopup="dialog"
+                  aria-expanded={rulesOpen} aria-controls="room-rules-dialog" disabled={blocked || !showRulesButton}
+                  onClick={() => { if (!blocked && showRulesButton) setRulesOpen(true); }}>ルール設定</button>}
+              </div>}
           </div>
         </div>
       </div>
@@ -123,7 +137,111 @@ export function VipLobby({ info, room, setReady, leave, blocked, deadline, enter
         </button>
       </footer>
     </div>
+    {lobby && <RoomRulesDialog lobby={lobby} open={!blocked && rulesOpen} canEdit={canConfigureRules}
+      opener={rulesButton} onClose={() => setRulesOpen(false)} onSave={setRules} />}
   </main>;
+}
+
+function RoomRulesDialog({ lobby, open, canEdit, opener, onClose, onSave }: {
+  lobby: NonNullable<ConnectionView['lobby']>;
+  open: boolean;
+  canEdit: boolean;
+  opener: RefObject<HTMLButtonElement | null>;
+  onClose: () => void;
+  onSave?: (rules: GameRules, rulesRevision: number) => void;
+}) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const saveButton = useRef<HTMLButtonElement>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const editRevision = useRef(lobby.rulesRevision);
+  const [phase, setPhase] = useState<'closed' | 'opening' | 'open' | 'closing'>('closed');
+  const [draft, setDraft] = useState<GameRules>(lobby.rules ?? DEFAULT_GAME_RULES);
+  const dialogStyle: CSSProperties & { '--player-count': number } = { '--player-count': 2 };
+  const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  useEffect(() => {
+    if (!open || !dialog.current || dialog.current.open) return;
+    setDraft(lobby.rules ?? DEFAULT_GAME_RULES);
+    editRevision.current = lobby.rulesRevision;
+    const instant = reduced();
+    dialog.current.showModal();
+    setPhase(instant ? 'open' : 'opening');
+    saveButton.current?.focus({ preventScroll: true });
+    if (!instant) timer.current = window.setTimeout(() => setPhase('open'), 420);
+  }, [open, lobby.rules]);
+
+  useEffect(() => {
+    if (!open || !dialog.current?.open || editRevision.current === lobby.rulesRevision) return;
+    editRevision.current = lobby.rulesRevision;
+    setDraft(lobby.rules ?? DEFAULT_GAME_RULES);
+  }, [open, lobby.rules, lobby.rulesRevision]);
+
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+
+  function close() {
+    window.clearTimeout(timer.current);
+    if (!dialog.current?.open) { onClose(); return; }
+    if (reduced()) { dialog.current.close(); return; }
+    setPhase('closing');
+    timer.current = window.setTimeout(() => dialog.current?.close(), 420);
+  }
+
+  function finish() {
+    window.clearTimeout(timer.current);
+    setPhase('closed');
+    onClose();
+    opener.current?.focus({ preventScroll: true });
+  }
+
+  function save() {
+    if (canEdit && lobby.phase === 'waiting' && onSave && editRevision.current === lobby.rulesRevision) {
+      onSave(draft, editRevision.current);
+    }
+    close();
+  }
+
+  return <dialog id="room-rules-dialog" className="vip-dialog rules-dialog" ref={dialog} data-phase={phase}
+    style={dialogStyle} aria-labelledby="room-rules-title"
+    onCancel={event => { event.preventDefault(); close(); }} onClose={finish}>
+    <div className="vip-shell">
+      <div className="vip-frame" aria-hidden="true" />
+      <div className="frame-sweep" aria-hidden="true"><i /><i /><i /><i /></div>
+      <div className="frame-origin" aria-hidden="true" />
+      <header className="vip-toolbar">
+        <span />
+        <div className="vip-toolbar-title"><CrownIcon /><h2 id="room-rules-title" lang="en">VIP PLAYER</h2><span>ルール設定</span></div>
+        <button type="button" className="vip-quiet vip-close" onClick={close}><span aria-hidden="true">×</span><span>閉じる</span></button>
+      </header>
+      <div className="vip-content rules-content">
+        <label className="rule-option"><span>勝利点</span>
+          <select value={canEdit ? draft.victoryPoints : lobby.rules.victoryPoints} disabled={!canEdit || lobby.phase !== 'waiting'}
+            onChange={event => {
+              const points = VICTORY_POINT_OPTIONS.find(option => String(option) === event.currentTarget.value);
+              if (points !== undefined) setDraft(previous => ({ ...previous, victoryPoints: points }));
+            }}>
+            {VICTORY_POINT_OPTIONS.map(points => <option key={points} value={points}>{points.toLocaleString('ja-JP')}点</option>)}
+          </select>
+        </label>
+        <label className="rule-option"><span>初期配置サイコロ数</span>
+          <select value={canEdit ? draft.startingDice : lobby.rules.startingDice} disabled={!canEdit || lobby.phase !== 'waiting'}
+            onChange={event => {
+              const value = event.currentTarget.value;
+              const count = STARTING_DICE_OPTIONS.find(option => String(option) === value);
+              if (count !== undefined) setDraft(previous => ({ ...previous, startingDice: count }));
+            }}>
+            {STARTING_DICE_OPTIONS.map(count => <option key={count} value={count}>{count === 'official' ? '公式ルール' : `${count}個`}</option>)}
+          </select>
+        </label>
+        <p className="rules-note" role="status">{canEdit ? 'ルールを保存すると、全員のREADYが解除されます。' : 'ホストが設定したルールを確認できます。'}</p>
+        {lobby.phase === 'countdown' && <p className="rules-note">開始カウントダウン中は設定を変更できません。</p>}
+        <div className="rules-actions">
+          <button type="button" className="vip-quiet" onClick={close}>戻る</button>
+          {canEdit && <button ref={saveButton} type="button" className="casino-action"
+            disabled={lobby.phase !== 'waiting'} onClick={save}><span>保存</span></button>}
+        </div>
+      </div>
+    </div>
+  </dialog>;
 }
 
 function RoomIdentity({ room }: { room: CasinoRoomInfo }) {
@@ -281,6 +399,7 @@ export function CasinoFlow({ connection, audio, invitedRoom, onRoomChanged }: {
     {(opening || scene === 'ROOM_SELECT' || scene === 'ROOM_CONNECTING') &&
       <RoomChooser invitedRoom={invitedRoom} pending={roomPending} problem={roomProblem} blocked={opening} submit={openRoom} />}
     {showLobby && roomView?.room && <VipLobby info={roomView} room={roomView.room} setReady={ready => connection.setReady(ready)}
+          setRules={(rules, revision) => connection.setRules(rules, revision)}
       leave={leave} blocked={!entered} deadline={deadline} enteringGame={enteringGame} />}
     {motion && <RoomDoor motion={motion} onComplete={finishDoor} />}
     {(opening || scene === 'LOADING' || scene === 'LOAD_ERROR' || scene === 'RESTORING' || scene === 'READY_TO_ENTER') &&

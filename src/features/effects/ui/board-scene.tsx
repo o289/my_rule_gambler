@@ -8,6 +8,7 @@ import type { GemId } from '../../board/model/gems';
 import { centerWithin } from './visuals';
 import { CONVERGING_LIGHT_STAGGER_MS, CONVERGING_LIGHT_TRAVEL_MS } from '../model/effect-model';
 import type { Point } from './visuals';
+import { PLACEMENT_LIGHT_MS } from './board-score/board-motion';
 
 const noSelection = () => undefined;
 
@@ -110,6 +111,64 @@ export function GemFlight({ stage, board, source, gem, target }: GemFlightProps)
     return () => motion.cancel();
   }, [stage, board, source, target]);
   return <img ref={image} className="flying-gem" style={{ color: GEMS[gem].color }} src={GEMS[gem].image} alt="" aria-hidden="true" />;
+}
+
+export function BoardPlacementLight({ stage, board, gem, target, onComplete }: {
+  stage: RefObject<HTMLElement | null>;
+  board: RefObject<HTMLElement | null>;
+  gem: GemId;
+  target: CellAddress;
+  onComplete: () => void;
+}) {
+  const light = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const shell = stage.current;
+    const root = board.current;
+    const moving = light.current;
+    if (!shell || !root || !moving) {
+      onComplete();
+      return;
+    }
+    const started = performance.now();
+    let frame = 0;
+    let finished = false;
+    const animate = (now: number) => {
+      const cell = locateCell(root, target);
+      const surface = root.querySelector<HTMLElement>('.board-area');
+      const shellRect = shell.getBoundingClientRect();
+      const surfaceRect = (surface ?? root).getBoundingClientRect();
+      const targetRect = cell?.getBoundingClientRect();
+      if (!targetRect) {
+        finished = true;
+        onComplete();
+        return;
+      }
+      const progress = Math.min(1, (now - started) / PLACEMENT_LIGHT_MS);
+      const eased = 1 - (1 - progress) ** 3;
+      const startX = surfaceRect.right - shellRect.left - 18;
+      const startY = surfaceRect.bottom - shellRect.top - 18;
+      const endX = targetRect.left + targetRect.width / 2 - shellRect.left;
+      const endY = targetRect.top + targetRect.height / 2 - shellRect.top;
+      const x = startX + (endX - startX) * eased;
+      const y = startY + (endY - startY) * eased;
+      const size = moving.offsetWidth || 38;
+      moving.style.transform = `translate3d(${x - size / 2}px, ${y - size / 2}px, 0) scale(${.55 + eased * .5})`;
+      moving.style.opacity = String(progress < .92 ? 1 : (1 - progress) / .08);
+      if (progress >= 1) {
+        finished = true;
+        onComplete();
+        return;
+      }
+      frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => {
+      cancelAnimationFrame(frame);
+      if (!finished) moving.style.opacity = '0';
+    };
+  }, [stage, board, target, onComplete]);
+
+  return <span ref={light} className="board-placement-light" style={{ color: GEMS[gem].color }} aria-hidden="true" />;
 }
 
 export function ConvergingLights({ stage, board, target }: {

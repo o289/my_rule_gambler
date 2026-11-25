@@ -1,4 +1,6 @@
 import type { CasinoRoomInfo, Seat } from '../../../shared/contracts/casino-entry';
+import { dicePerPlayer, isGameRules, totalStartingDice } from '../../../shared/contracts/game-rules';
+import type { GameRules } from '../../../shared/contracts/game-rules';
 import { GEM_ORDER } from '../../../features/dice/model/geometry';
 import type { DiceResult, DiePose, Frame, MatchPlayerSetup, MatchResult, Placement, RollConfig, RollView } from '../../../shared/contracts/dice';
 import type { DiceGameState } from './dice-game';
@@ -45,6 +47,10 @@ export interface RoomSnapshot {
   completedRows: string[];
   matchResult: MatchResult | null;
   rollView: RollView | null;
+  rules?: GameRules;
+  rulesRevision?: number;
+  totalDice?: number;
+  pendingRound?: { playerId: string; startAt: number } | null;
 }
 
 function record(value: unknown): value is Record<string, unknown> {
@@ -99,7 +105,7 @@ function participant(value: unknown): value is SavedParticipant {
 function savedMatchPlayer(value: unknown): value is SavedMatchPlayer {
   return record(value) && string(value.id) && int(value.score) && Array.isArray(value.wallet)
     && value.wallet.every(item => record(item) && [10, 50, 100].includes(Number(item.denomination)) && int(item.count, 0, 30))
-    && list(value.handDiceIds, string, 30);
+    && list(value.handDiceIds, string, 102);
 }
 function matchResult(value: unknown): value is MatchResult {
   return record(value) && (value.status === 'continue' || value.status === 'won') && int(value.highestScore)
@@ -128,9 +134,21 @@ function isRoomSnapshot(value: unknown, expectedInfo: CasinoRoomInfo): value is 
     || !int(value.roundNumber, 1) || !list(value.usedBoardSeeds, item => int(item, 0, 0xffff_ffff), 10_000)
     || !list(value.matchSeats, seat, 6)
     || (value.matchParticipants !== null && !list(value.matchParticipants, savedMatchPlayer, 6))
-    || !list(value.unusedDiceIds, string, 30) || !list(value.completedRows, string, 6)
+    || !list(value.unusedDiceIds, string, 102) || !list(value.completedRows, string, 6)
     || (value.matchResult !== null && !matchResult(value.matchResult))
-    || (value.rollView !== null && !rollView(value.rollView))) return false;
+    || (value.rollView !== null && !rollView(value.rollView))
+    || (value.rules !== undefined && !isGameRules(value.rules))
+    || (value.rulesRevision !== undefined && !int(value.rulesRevision))
+    || (value.totalDice !== undefined && !int(value.totalDice, 30, 102))
+    || (value.pendingRound !== undefined && value.pendingRound !== null
+      && (!record(value.pendingRound) || !string(value.pendingRound.playerId) || !finite(value.pendingRound.startAt)))) return false;
+  if (value.totalDice !== undefined && value.matchParticipants !== null && isGameRules(value.rules)) {
+    const rules = value.rules;
+    const playerCount = Array.isArray(value.matchSeats) && value.matchSeats.length >= 2 ? value.matchSeats.length : 2;
+    if (value.totalDice !== totalStartingDice(rules, playerCount)) return false;
+    if (Array.isArray(value.matchParticipants) && value.matchParticipants.some(player => record(player)
+      && Array.isArray(player.handDiceIds) && player.handDiceIds.length > dicePerPlayer(rules, playerCount))) return false;
+  }
   if (value.game !== null && value.game.phase === 'rolling') return false;
   return true;
 }

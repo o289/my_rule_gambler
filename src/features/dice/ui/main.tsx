@@ -19,10 +19,10 @@ import { placementCandidates } from '../model/placement-feedback';
 import { ROLL_RESULT_DISPLAY_MS, rollPresentationAction } from '../model/roll-presentation';
 import { TURN_CHANGE_DURATION_MS, REDUCED_TURN_CHANGE_DURATION_MS } from '../../effects/model/effect-model';
 import { scoreLabel } from '../../effects/model/effect-model';
-import { TurnAnnouncement } from '../../effects/ui/settlement-scenes';
+import { TurnChangeMainScene } from '../../effects/ui/settlement-scenes';
 import { dicePresentationMode, oneCellComebackHint, settlementStages } from '../model/settlement-presentation';
-import { PLACEMENT_FLASH_MS, REDUCED_SCORE_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
-import { locateCell } from '../../effects/ui/board-scene';
+import { REDUCED_SCORE_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
+import { BoardPlacementLight, locateCell } from '../../effects/ui/board-scene';
 import { BankAudio } from '../../bank/ui/bank-audio';
 import { SettlementBank } from './settlement-bank';
 import { SoundManager } from '../../effects/ui/sound';
@@ -161,11 +161,6 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const [shownPlacement, setShownPlacement] = useState(-1);
   const placementPlaying = hasStandardMatch && !settlement && !trayRoll && !reducedMotion
     && placementRevision !== undefined && placementRevision > shownPlacement;
-  useEffect(() => {
-    if (!placementPlaying || placementRevision === undefined) return;
-    const timer = window.setTimeout(() => setShownPlacement(placementRevision), PLACEMENT_FLASH_MS);
-    return () => window.clearTimeout(timer);
-  }, [placementPlaying, placementRevision]);
 
   useEffect(() => {
     if (!hasStandardMatch || settlement || trayRoll || placementPlaying || !game || game.phase !== 'ready' || game.turnSequence < 1 || info.match?.result) return;
@@ -187,6 +182,9 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const [choice, setChoice] = useState<{ rollId: string; dieId: string }>();
   const [mainPanel, setMainPanel] = useState<DiceMainPanel>('board');
   const mainPanelFocus = useRef<DiceMainPanel | null>(null);
+  useLayoutEffect(() => {
+    if (placementPlaying && mainPanel === 'operations') setMainPanel('board');
+  }, [placementPlaying, mainPanel]);
   const remainingResults = game ? game.results.filter(result => game.remaining.includes(result.id)) : [];
   const selected = choice && choice.rollId === roll?.id ? remainingResults.find(result => result.id === choice.dieId) : undefined;
   const displayGame = settlementSnapshot?.game ?? game;
@@ -196,10 +194,19 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
   const eventGoal = eventRow ? goalColumn(definition, eventRow) : undefined;
   const eventTarget = useMemo(() => eventGoal && settlement?.columnId === eventGoal.id && eventRow
     ? { rowId: eventRow.id, columnId: eventGoal.id } : undefined, [eventGoal, eventRow, settlement]);
+  const livePlacementTarget = useMemo(() => {
+    if (!info.placement) return undefined;
+    const row = definition.rows[info.placement.row];
+    const column = definition.columns[info.placement.column];
+    return row && column ? { rowId: row.id, columnId: column.id } : undefined;
+  }, [definition, info.placement]);
   const stages = useMemo(() => settlement && eventTarget ? settlementStages(settlement, definition) : [],
     [settlement, eventTarget, definition]);
   const stageIndex = settlementProgress?.key === settlementKey ? settlementProgress.index : 0;
   const stage = trayRoll ? undefined : stages[stageIndex];
+  useLayoutEffect(() => {
+    if (stage?.kind === 'placement' && mainPanel === 'operations') setMainPanel('board');
+  }, [stage?.kind, mainPanel]);
   const effect = stage?.kind === 'effect' ? stage.request : null;
   const scoreDuration = eventRow
     ? reducedMotion ? REDUCED_SCORE_MS : scoreTimings(playableColumns(definition, eventRow).length).total
@@ -212,11 +219,30 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
     });
   }, [connection, settlement, settlementKey, stageIndex]);
 
+  const animatePlacement = !reducedMotion && (stage?.kind === 'placement' || placementPlaying);
+  const placementTarget = stage?.kind === 'placement' ? eventTarget : livePlacementTarget;
+  const placementGem = stage?.kind === 'placement' ? settlement?.gem : info.placement?.gem;
+  const placementLightKey = stage?.kind === 'placement' ? settlementKey : placementRevision;
+  const placementLightCanPlay = Boolean(animatePlacement && placementTarget && placementGem
+    && placementLightKey !== null && placementLightKey !== undefined);
+  const completePlacementLight = useCallback(() => {
+    if (stage?.kind === 'placement' && settlement) advanceSettlement();
+    else if (placementRevision !== undefined) {
+      setShownPlacement(previous => Math.max(previous, placementRevision));
+    }
+  }, [stage?.kind, settlement, advanceSettlement, placementRevision]);
+
+  useEffect(() => {
+    if (!placementPlaying || placementLightCanPlay || placementRevision === undefined) return;
+    setShownPlacement(previous => Math.max(previous, placementRevision));
+  }, [placementPlaying, placementLightCanPlay, placementRevision]);
+
   useLayoutEffect(() => {
     if (trayRoll) return;
     if (settlement) setShownPlacement(previous => Math.max(previous, settlement.revision));
-    locateCell(boardRef.current, eventTarget)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-  }, [eventTarget, settlement, trayRoll]);
+    const target = eventTarget ?? (placementPlaying ? livePlacementTarget : undefined);
+    locateCell(boardRef.current, target)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [eventTarget, settlement, trayRoll, placementPlaying, livePlacementTarget]);
 
   useEffect(() => {
     if (!trayRoll && settlement && (!stage || (stage.kind === 'bank' && !settlementSnapshot))) {
@@ -227,15 +253,16 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
 
   useEffect(() => {
     if (stage?.kind !== 'placement' && stage?.kind !== 'score') return;
+    if (stage.kind === 'placement' && !reducedMotion && placementLightCanPlay) return;
     const scoring = stage.kind === 'score';
     if (scoring) settlementAudio.playCue('BOARD_SCORE', 'start', reducedMotion);
-    const duration = scoring ? scoreDuration : reducedMotion ? 0 : PLACEMENT_FLASH_MS;
+    const duration = scoring ? scoreDuration : 0;
     const timer = window.setTimeout(advanceSettlement, duration);
     return () => {
       window.clearTimeout(timer);
       if (scoring) settlementAudio.cut();
     };
-  }, [stage, scoreDuration, settlementAudio, reducedMotion, advanceSettlement]);
+  }, [stage, scoreDuration, settlementAudio, reducedMotion, placementLightCanPlay, advanceSettlement]);
   const board = useMemo(() => {
     const state = boardAdapter.createState(definition, displayGame);
     const placement = info.placement;
@@ -376,9 +403,6 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
     {info.status !== 'online' && <p className="dice-connection-status" role="status">
       {info.status === 'offline' ? '再接続中' : '接続中'}
     </p>}
-    {showTurnChange && current && game && <section key={game.turnSequence} className="turn-change-gate" aria-label="手番の案内">
-      <TurnAnnouncement key={game.turnSequence} player={{ playerName: current.name, isLocal: own }} pulse />
-    </section>}
     <div className="settlement-stage">
     {presentationMode === 'result' && finalResult && info.match ? <FinalResults players={info.match.players} winners={finalResult.winners}
       connected={info.status === 'online'} pending={info.returningToLobby} problem={info.problem}
@@ -405,7 +429,8 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
             onClick={() => connection.send({ type: 'end-turn', revision: game.revision, turnSequence: game.turnSequence })}>END TURN</button>}
         </div>}
         <div id="main-area-content">
-        {trayRoll ? <DiceRollPanel key={trayRoll.id} roll={trayRoll} info={info} setFps={setFps}
+        {showTurnChange && current ? <TurnChangeMainScene key={game?.turnSequence} player={{ playerName: current.name, isLocal: own }} reduced={reducedMotion} />
+          : trayRoll ? <DiceRollPanel key={trayRoll.id} roll={trayRoll} info={info} setFps={setFps}
           onConfirm={confirm} onDismiss={dismissRoll} stream={connection.frames} onCup={cupSound} />
           : bankSettlement ? <SettlementBank key={settlementKey} event={bankSettlement.event} player={bankSettlement.player}
             audio={bankAudio} reduced={reducedMotion} onComplete={advanceSettlement} />
@@ -451,8 +476,12 @@ function App({ connection, boardAdapter }: { connection: DiceConnection; boardAd
           : <GamblerBoard board={definition} state={board} viewportRef={boardRef} candidates={candidates}
             scoreNotice={stage?.kind === 'score' && settlement && eventTarget ? { rowId: eventTarget.rowId, label: scoreLabel(settlement.points) } : undefined}
             hintCell={comebackHint?.target}
+            hidePlacementCell={animatePlacement && placementTarget ? cellKey(placementTarget) : undefined}
             onSelect={cell => boardAdapter.onSelect(cell, { game, roll, selected, canAct, inPlacement, board, definition })} />}
         </div>
+        {placementLightCanPlay && mainPanel !== 'operations' && placementTarget && placementGem && placementLightKey !== null && placementLightKey !== undefined
+          && <BoardPlacementLight key={placementLightKey} stage={mainArea} board={boardRef} gem={placementGem}
+            target={placementTarget} onComplete={completePlacementLight} />}
         {effect?.kind === 'BIG_WIN' && eventTarget && <Suspense fallback={null}>
           <SettlementOverlay key={`${settlementKey}-${stageIndex}`} request={effect} target={eventTarget} board={definition}
             boardRef={boardRef} audio={settlementAudio} reduced={reducedMotion} onComplete={advanceSettlement} />

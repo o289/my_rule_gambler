@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { DEFAULT_GAME_RULES } from '../../shared/contracts/game-rules';
 import { VipLobby } from '../../features/casino-entry/ui/casino-flow';
 import type { ConnectionView } from '../../features/casino-entry/ui/connection';
 import { FinalResults } from '../../features/dice/ui/final-results';
@@ -18,6 +19,7 @@ export default function ResultPreview() {
       status: 'online', playerId, room, problem: '', clockOffset: 0,
       lobby: {
         phase: 'waiting', startedPlayers: null, hostId: playerId, startAt: null, serverTime: 0,
+        rules: DEFAULT_GAME_RULES, rulesRevision: 0,
         seats: players.map(({ id, name, slot }) => ({ id, name, slot, online: true, ready: id === playerId && ready })),
       },
     };

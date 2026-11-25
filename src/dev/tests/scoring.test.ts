@@ -71,6 +71,15 @@ test('盤面に空きがあっても得点が500点に達した時点で対戦�
     'no later placements can change the finished match');
 });
 
+test('部屋で選んだ勝利点を境に対戦を続行または終了する', () => {
+  const partial = new Map([[cellKey({ rowId: 'bonus', columnId: 'ruby' }), { row: 0, column: 0 }]]);
+  const below700 = settleCompletedRows(board, partial, state([659, 680]), 'p1', 'bonus', 700);
+  assert.equal(below700.players[0]?.score, 679);
+  assert.equal(below700.result, null);
+  const at700 = settleCompletedRows(board, partial, state([680, 680]), 'p1', 'bonus', 700);
+  assert.deepEqual(at700.result, { status: 'won', highestScore: 700, winners: ['p1'] });
+});
+
 test('精算で勝利点に達した首位が同点なら同率優勝として記録する', () => {
   const complete = new Set([cellKey({ rowId: 'bonus', columnId: 'ruby' })]);
   const tied = settleCompletedRows(board, complete, {

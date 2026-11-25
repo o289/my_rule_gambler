@@ -65,7 +65,7 @@ export async function startCasinoServer(options: HttpOptions) {
               registry.deleteIfEmpty(room.info.id);
               id = null;
               peer.close(1000, 'left room');
-            } else if (room && id && (message.type === 'ready' || message.type === 'clock')) {
+            } else if (room && id && (message.type === 'ready' || message.type === 'clock' || message.type === 'set-rules')) {
               room.commandLobby(id, roomPeer, message);
             }
           },

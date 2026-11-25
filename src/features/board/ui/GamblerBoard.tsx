@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, Ref } from 'react';
 import type { BoardDefinition, BoardState, CellAddress } from '../model/board-model';
 import { cellKey, formatScore, nextOpenCell, playableColumns, requiredGemAt } from '../model/board-model';
-import { PLACEMENT_FLASH_MS, SCORE_BEAM_MS, SCORE_PLATE_MS, SCORE_STAGGER_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
+import { SCORE_BEAM_MS, SCORE_PLATE_MS, SCORE_STAGGER_MS, scoreTimings } from '../../effects/ui/board-score/board-motion';
 import { GEMS } from '../model/gems';
 import type { GemId } from '../model/gems';
 
@@ -18,13 +18,14 @@ interface BoardCellProps {
   goal?: number;
   goalLabel?: string;
   placementId?: number;
+  placementPending?: boolean;
   awardId?: number;
   hinted?: boolean;
   scoreDelay: number;
   onSelect: (cell: CellAddress) => void;
 }
 
-export function BoardCell({ address, label, state, selected, expected, gem, goal, goalLabel, placementId, awardId, hinted, scoreDelay, onSelect }: BoardCellProps) {
+export function BoardCell({ address, label, state, selected, expected, gem, goal, goalLabel, placementId, placementPending, awardId, hinted, scoreDelay, onSelect }: BoardCellProps) {
   const placed = gem !== undefined;
   const blocked = state === 'blocked';
   const displayed = gem ?? expected;
@@ -42,12 +43,12 @@ export function BoardCell({ address, label, state, selected, expected, gem, goal
         data-column={address.columnId}
         data-goal={goal !== undefined || undefined}
         data-required-gem={expected}
+        data-placement-arrival={placementPending ? 'pending' : undefined}
         aria-label={label}
         aria-pressed={blocked ? undefined : selected}
         disabled={blocked}
         onClick={() => onSelect(address)}
       >
-        {placementId !== undefined && <span key={`flash-${placementId}`} className="placement-flash" aria-hidden="true" />}
         {displayed && <img key={`gem-${placementId ?? displayed}`} className={placed
           ? placementId === undefined ? 'cell-gem' : 'cell-gem cell-gem--placed'
           : 'cell-gem cell-gem--required'} src={GEMS[displayed].image} alt="" draggable={false} />}
@@ -70,11 +71,11 @@ interface BoardProps {
   scoreNotice?: { rowId: string; label: string };
   candidates?: ReadonlySet<string>;
   hintCell?: CellAddress;
+  hidePlacementCell?: string;
 }
 
 type BoardStyle = CSSProperties & {
   '--columns': number;
-  '--placement-flash-duration': string;
   '--beam-duration': string;
   '--plate-duration': string;
 };
@@ -86,13 +87,12 @@ function formatShortState(state: CellState, gem?: GemId) {
   return state === 'available' ? '次に配置できるマス' : '未配置';
 }
 
-export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice, candidates, hintCell }: BoardProps) {
+export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice, candidates, hintCell, hidePlacementCell }: BoardProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const cabinet = useRef<HTMLDivElement>(null);
   const [isOverflowing, setOverflowing] = useState(false);
   const style: BoardStyle = {
     '--columns': board.columns.length,
-    '--placement-flash-duration': `${PLACEMENT_FLASH_MS}ms`,
     '--beam-duration': `${SCORE_BEAM_MS}ms`,
     '--plate-duration': `${SCORE_PLATE_MS}ms`,
   };
@@ -153,6 +153,7 @@ export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice,
                         goal={isGoal ? score : undefined}
                         goalLabel={isGoal && scoreNotice?.rowId === row.id ? scoreNotice.label : undefined}
                         placementId={!blocked && state.placement?.cell === key ? state.placement.id : undefined}
+                        placementPending={!blocked && hidePlacementCell === key}
                         awardId={blocked ? undefined : awardId}
                         hinted={!blocked && hintCell?.rowId === row.id && hintCell.columnId === column.id}
                         scoreDelay={playableIndex * SCORE_STAGGER_MS}

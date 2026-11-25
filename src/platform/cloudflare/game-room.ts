@@ -396,7 +396,7 @@ export class GameRoomObject {
       room.exitLobby(context.id, context.peer);
       context.id = '';
       this.closeAfterCommit.set(context.socket, { code: 1000, reason: 'left room' });
-    } else if (message.type === 'clock' || message.type === 'ready') {
+    } else if (message.type === 'clock' || message.type === 'ready' || message.type === 'set-rules') {
       room.commandLobby(context.id, context.peer, message);
     }
   }

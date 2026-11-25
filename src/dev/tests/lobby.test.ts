@@ -6,6 +6,7 @@ import type { LobbyPeer } from '../../platform/server/core/room';
 import type { RoomRuntime } from '../../platform/server/core/ports';
 import { MAX_PLAYERS, MIN_PLAYERS, readClientMessage, readServerMessage } from '../../shared/contracts/casino-entry';
 import type { ServerMessage } from '../../shared/contracts/casino-entry';
+import { DEFAULT_GAME_RULES } from '../../shared/contracts/game-rules';
 
 class Guest implements LobbyPeer {
   readonly protocol = 'lobby' as const;
@@ -159,10 +160,78 @@ test('待機中に準備前の参加者が退出し、残りが条件を満た�
 });
 
 test('準備状態のメッセージは真偽値だけを受け付ける', () => {
-  assert.deepEqual(readClientMessage({ type: 'ready', ready: false }), { type: 'ready', ready: false });
+  assert.deepEqual(readClientMessage({ type: 'ready', ready: false }), { type: 'ready', ready: false, rulesRevision: 0 });
+  assert.equal(readClientMessage({ type: 'ready', ready: true, rulesRevision: 1.5 }), null);
   assert.equal(readClientMessage({ type: 'ready', ready: 1 }), null);
   assert.equal(readClientMessage({ type: 'ready' }), null);
+  assert.equal(readClientMessage({ type: 'set-rules', rules: { victoryPoints: 301, startingDice: 10 }, rulesRevision: 0 }), null);
+  assert.equal(readClientMessage({ type: 'set-rules', rules: { victoryPoints: 700, startingDice: 7 }, rulesRevision: 0 }), null);
+  assert.deepEqual(readClientMessage({ type: 'set-rules', rules: { victoryPoints: 700, startingDice: 10 }, rulesRevision: 0 }),
+    { type: 'set-rules', rules: { victoryPoints: 700, startingDice: 10 }, rulesRevision: 0 });
   assert.equal(readClientMessage({ type: 'clock', sentAt: -1 }), null);
+});
+
+test('ルール変更はホストだけが待機中に行え、全READY解除後は古いREADY世代を拒む', () => {
+  const room = new Room(roomInfo, runtime, { mode: 'standard', countdownMs });
+  try {
+    const host = join(room);
+    const guest = join(room);
+    assert.deepEqual(host.state.rules, DEFAULT_GAME_RULES);
+    ready(room, host);
+    room.commandLobby(guest.welcome.playerId, guest, {
+      type: 'set-rules', rules: { victoryPoints: 700, startingDice: 8 }, rulesRevision: 0,
+    });
+    assert.ok(guest.seen.some(message => message.type === 'error' && message.code === 'RULES_LOCKED'));
+    assert.equal(host.state.rulesRevision, 0);
+
+    room.commandLobby(host.welcome.playerId, host, {
+      type: 'set-rules', rules: { victoryPoints: 700, startingDice: 8 }, rulesRevision: 0,
+    });
+    assert.equal(host.state.rules.victoryPoints, 700);
+    assert.equal(host.state.rules.startingDice, 8);
+    assert.equal(host.state.rulesRevision, 1);
+    assert.ok(host.state.seats.every(seat => !seat.ready));
+    room.commandLobby(guest.welcome.playerId, guest, { type: 'ready', ready: true, rulesRevision: 0 });
+    assert.ok(guest.seen.some(message => message.type === 'error' && message.code === 'STALE_RULES'));
+    assert.equal(host.state.phase, 'waiting');
+
+    room.commandLobby(host.welcome.playerId, host, { type: 'ready', ready: true, rulesRevision: 1 });
+    room.commandLobby(guest.welcome.playerId, guest, { type: 'ready', ready: true, rulesRevision: 1 });
+    assert.equal(host.state.phase, 'countdown');
+    room.commandLobby(host.welcome.playerId, host, {
+      type: 'set-rules', rules: { victoryPoints: 300, startingDice: 'official' }, rulesRevision: 1,
+    });
+    assert.ok(host.seen.some(message => message.type === 'error' && message.code === 'RULES_LOCKED'));
+    assert.equal(host.state.rules.victoryPoints, 700, 'countdown locks the current rules');
+  } finally { room.dispose(); }
+});
+
+test('保存済みルールは復元され、ルール項目のない旧形式は既定値で復元する', () => {
+  const room = new Room(roomInfo, runtime, { mode: 'standard', countdownMs });
+  const host = join(room);
+  join(room);
+  room.commandLobby(host.welcome.playerId, host, {
+    type: 'set-rules', rules: { victoryPoints: 1200, startingDice: 12 }, rulesRevision: 0,
+  });
+  const saved = room.snapshot();
+  room.dispose();
+
+  const restored = Room.restore(roomInfo, runtime, saved);
+  assert.ok(restored);
+  try {
+    const reconnected = join(restored, host.welcome.token);
+    assert.deepEqual(reconnected.state.rules, { victoryPoints: 1200, startingDice: 12 });
+    assert.equal(reconnected.state.rulesRevision, 1);
+  } finally { restored.dispose(); }
+
+  const { rules: _rules, rulesRevision: _rulesRevision, totalDice: _totalDice, ...legacy } = saved;
+  const legacyRestored = Room.restore(roomInfo, runtime, legacy);
+  assert.ok(legacyRestored);
+  try {
+    const reconnected = join(legacyRestored, host.welcome.token);
+    assert.deepEqual(reconnected.state.rules, DEFAULT_GAME_RULES);
+    assert.equal(reconnected.state.rulesRevision, 0);
+  } finally { legacyRestored.dispose(); }
 });
 
 test('部屋に入るメッセージは名前付きの部屋作成とIDによる検索を区別する', () => {

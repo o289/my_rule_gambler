@@ -1,3 +1,6 @@
+import { isGameRules } from './game-rules';
+import type { GameRules } from './game-rules';
+
 export const MIN_PLAYERS = 2;
 export const MAX_PLAYERS = 6;
 export const COUNTDOWN_MS = 3000;
@@ -15,12 +18,15 @@ export interface LobbyState {
   hostId: string | null;
   startAt: number | null;
   serverTime: number;
+  rules: GameRules;
+  rulesRevision: number;
 }
 
 export type ClientMessage =
   | { type: 'create'; name: string }
   | { type: 'join'; room: string; token?: string }
-  | { type: 'ready'; ready: boolean }
+  | { type: 'ready'; ready: boolean; rulesRevision?: number }
+  | { type: 'set-rules'; rules: GameRules; rulesRevision: number }
   | { type: 'leave' }
   | { type: 'clock'; sentAt: number };
 
@@ -71,7 +77,10 @@ export function readClientMessage(value: unknown): ClientMessage | null {
       return room && (value.token === undefined || token(value.token))
         ? { type: 'join', room, token: value.token } : null;
     }
-    case 'ready': return typeof value.ready === 'boolean' ? { type: 'ready', ready: value.ready } : null;
+    case 'ready': return typeof value.ready === 'boolean' && (value.rulesRevision === undefined || int(value.rulesRevision))
+      ? { type: 'ready', ready: value.ready, rulesRevision: value.rulesRevision ?? 0 } : null;
+    case 'set-rules': return isGameRules(value.rules) && int(value.rulesRevision)
+      ? { type: 'set-rules', rules: value.rules, rulesRevision: value.rulesRevision } : null;
     case 'leave': return { type: 'leave' };
     case 'clock': return int(value.sentAt) ? { type: 'clock', sentAt: value.sentAt } : null;
     default: return null;
@@ -88,6 +97,7 @@ function lobbyState(value: unknown): value is LobbyState {
     && (value.startedPlayers === null || Array.isArray(value.startedPlayers) && value.startedPlayers.length >= MIN_PLAYERS
       && value.startedPlayers.length <= MAX_PLAYERS && value.startedPlayers.every(seat))
     && (value.hostId === null || id(value.hostId)) && int(value.serverTime)
+    && isGameRules(value.rules) && int(value.rulesRevision)
     && (value.phase === 'countdown' ? int(value.startAt) && value.startedPlayers === null
       : value.phase === 'waiting' ? value.startAt === null && value.startedPlayers === null
         : value.phase === 'started' && value.startAt === null && value.startedPlayers !== null);
