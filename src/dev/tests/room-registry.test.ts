@@ -798,6 +798,7 @@ test('500点に達すると対戦が終了し、各自で待機室に戻って�
     assert.equal(finished.state.turnId, null);
     assert.equal(finished.roll, null);
     assert.equal(finished.match?.roundNumber, 2);
+    assert.deepEqual(finished.match?.rules, { victoryPoints: 500, startingDice: 'official' });
     assert.deepEqual(finished.match?.result, { status: 'won', highestScore: 500, winners: [ids[0]] });
     assert.equal(finished.state.placements.length, 20, 'the empty penalty goal does not delay victory');
     assert.equal(finished.match?.completedRows.length, 5);
@@ -862,7 +863,10 @@ test('500点に達すると対戦が終了し、各自で待機室に戻って�
     room.connectLobby(returning, lobby[1]!.welcome.token);
     assert.equal(returning.state.seats.find(seat => seat.id === ids[1])?.ready, false);
     assert.equal(returning.state.phase, 'waiting');
-    room.commandLobby(ids[1]!, returning, { type: 'ready', ready: true });
+    const rematchRules = { victoryPoints: 700, startingDice: 12 } as const;
+    room.commandLobby(ids[0]!, replay, { type: 'set-rules', rules: rematchRules, rulesRevision: replay.state.rulesRevision });
+    room.commandLobby(ids[0]!, replay, { type: 'ready', ready: true, rulesRevision: replay.state.rulesRevision });
+    room.commandLobby(ids[1]!, returning, { type: 'ready', ready: true, rulesRevision: returning.state.rulesRevision });
     assert.equal(returning.state.phase, 'countdown');
     await delay(20);
     assert.equal(replay.state.phase, 'started');
@@ -878,6 +882,10 @@ test('500点に達すると対戦が終了し、各自で待機室に戻って�
     assert.deepEqual(reset.state.placements, []);
     assert.equal(reset.match?.result, null);
     assert.equal(reset.match?.roundNumber, 1);
-    assert.deepEqual(reset.match?.players.map(player => [player.score, player.diceCount]), [[80, 15], [80, 15]]);
+    assert.deepEqual(reset.match?.rules, rematchRules);
+    assert.deepEqual(reset.match?.players.map(player => [player.score, player.diceCount]), [[80, 12], [80, 12]]);
+    const rematchGuest = new DiceGuest();
+    room.connectDice(rematchGuest, { token: lobby[1]!.welcome.token });
+    assert.deepEqual(latest(rematchGuest).match?.rules, rematchRules);
   } finally { registry.dispose(); }
 });

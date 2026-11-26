@@ -1,5 +1,6 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, Ref, RefObject } from 'react';
+import type { GameRules } from '../../../shared/contracts/game-rules';
 import { rankPlayers } from '../model/player-data';
 import type { PlayerSnapshot } from '../model/player-data';
 import { CrownIcon, ChevronIcon } from './vip-icons';
@@ -22,6 +23,7 @@ export interface PlayerModalHandle {
 
 interface ModalProps {
   snapshot: PlayerSnapshot;
+  readonly matchRules?: GameRules;
   opener: RefObject<HTMLButtonElement | null>;
   ref?: Ref<PlayerModalHandle>;
   onVisibilityChange: (visible: boolean) => void;
@@ -29,7 +31,7 @@ interface ModalProps {
 
 const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-export function PlayerInfoModal({ snapshot, opener, ref, onVisibilityChange }: ModalProps) {
+export function PlayerInfoModal({ snapshot, matchRules, opener, ref, onVisibilityChange }: ModalProps) {
   const dialog = useRef<HTMLDialogElement>(null);
   const viewport = useRef<HTMLDivElement>(null);
   const closeButton = useRef<HTMLButtonElement>(null);
@@ -195,7 +197,17 @@ export function PlayerInfoModal({ snapshot, opener, ref, onVisibilityChange }: M
           {selected ? <PlayerDetail
             player={selected} rank={rank}
             current={selected.id === snapshot.currentTurnId} turnVersion={snapshot.turnVersion} you={selected.id === snapshot.youId}
-          /> : <PlayerList snapshot={snapshot} onSelect={select} />}
+          /> : <>
+            {matchRules && <section className="vip-match-rules" aria-labelledby="vip-match-rules-title">
+              <h3 id="vip-match-rules-title">適用ルール</h3>
+              <dl>
+                <div><dt>勝利点</dt><dd>{matchRules.victoryPoints.toLocaleString('ja-JP')}点</dd></div>
+                <div><dt>初期ダイス配布</dt><dd>{matchRules.startingDice === 'official'
+                  ? '公式ルール（人数に応じて配布）' : `1人あたり${matchRules.startingDice}個`}</dd></div>
+              </dl>
+            </section>}
+            <PlayerList snapshot={snapshot} onSelect={select} />
+          </>}
         </div>
       </div>
     </dialog>

@@ -297,6 +297,19 @@ body:has(.vip-dialog[open]) { overflow: hidden; }
 }
 .vip-content[data-view="detail"] { padding-top: 14px; }
 
+.vip-match-rules {
+  margin-bottom: 7px;
+  padding: 7px 10px;
+  border: 1px solid #744c31;
+  border-radius: 7px;
+  background: #2d1c14;
+}
+
+.vip-match-rules h3 { margin: 0 0 4px; color: var(--vip-gold); font-size: .875rem; }
+.vip-match-rules dl { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; }
+.vip-match-rules dt { color: var(--vip-muted); font-size: .75rem; }
+.vip-match-rules dd { margin: 0; color: var(--vip-pale); font-size: .875rem; }
+
 .vip-list {
   display: grid;
   gap: 7px;
