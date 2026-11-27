@@ -43,6 +43,6 @@ export function MatchPanel({ match, turnId, playerId, turnSequence, settlement, 
     <p className="match-round-number">ラウンド {settlement?.roundNumber ?? match.roundNumber}</p>
     <p className="match-dice-pool">未使用ダイス：{match.unusedDiceCount}個</p>
     <VIPPlayersButton buttonRef={opener} open={open} disabled={effectsPlaying} onClick={() => modal.current?.open()} />
-    <PlayerInfoModal ref={modal} snapshot={snapshot} opener={opener} onVisibilityChange={setOpen} />
+    <PlayerInfoModal ref={modal} snapshot={snapshot} matchRules={match.rules} opener={opener} onVisibilityChange={setOpen} />
   </section>;
 }
