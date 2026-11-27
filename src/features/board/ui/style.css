@@ -95,7 +95,10 @@ button:disabled { cursor: default; }
   gap: clamp(14px, 2.1vw, 29px);
 }
 
-.board-area { min-width: 0; }
+.board-area {
+  min-width: 0;
+  --board-scroll-space: 1.5rem;
+}
 
 .board-scroll {
   overflow: auto hidden;
@@ -117,15 +120,24 @@ button:disabled { cursor: default; }
   --board-pad: clamp(20px, 3.25vw, 34px);
   --rim-width: clamp(46px, 6.2vw, 72px);
   --tile-gap: clamp(3px, .45vw, 6px);
-  --goal-height: clamp(20px, 4.15cqi, 29px);
-  --goal-gap: 4px;
   --cell-min: 44px;
+  --board-height: max(0px, calc(var(--board-height-limit, 100dvh) - var(--board-scroll-space)));
+  --board-inset: min(var(--board-pad), calc(var(--board-height) / 18));
+  --row-gap: min(calc(var(--tile-gap) + 2px), calc(var(--board-height) / 90));
+  --row-height: calc((var(--board-height) - 2 * var(--board-inset) - (var(--rows) - 1) * var(--row-gap)) / var(--rows));
+  /* Leave room below each square tile for its score plate. */
+  --fit-goal-height: min(29px, calc(var(--row-height) * .24));
+  --goal-height: min(clamp(20px, 4.15cqi, 29px), var(--fit-goal-height));
+  --goal-gap: min(4px, calc(var(--row-height) * .06));
+  --fit-cell: max(0px, calc(var(--row-height) - var(--fit-goal-height) - var(--goal-gap)));
+  --fit-width: calc(2 * var(--board-inset) + var(--columns) * var(--fit-cell) + (var(--columns) - 1) * var(--tile-gap));
   position: relative;
   isolation: isolate;
   container-type: inline-size;
-  width: 100%;
-  min-width: calc(2 * var(--board-pad) + var(--columns) * (var(--cell-min) + var(--tile-gap)));
-  padding: var(--board-pad);
+  width: min(100%, var(--fit-width));
+  min-width: min(var(--fit-width), calc(2 * var(--board-inset) + var(--columns) * (var(--cell-min) + var(--tile-gap))));
+  margin-inline: auto;
+  padding: var(--board-inset);
 }
 
 .board-stone, .board-rim {
@@ -147,20 +159,20 @@ button:disabled { cursor: default; }
 .board-rim {
   inset: 0;
   z-index: 4;
-  border: var(--rim-width) solid transparent;
+  border: min(var(--rim-width), calc(var(--board-height) / 9)) solid transparent;
   border-image: url("../../../shared/assets/board/outer-frame.webp") 29% stretch;
   filter: drop-shadow(0 3px 2px #000b);
 }
 
 .board-grid {
   display: grid;
-  gap: calc(var(--tile-gap) + 2px);
+  gap: var(--row-gap);
 }
 
 .board-row {
   display: grid;
   position: relative;
-  grid-template-columns: repeat(var(--columns), minmax(var(--cell-min), 1fr));
+  grid-template-columns: repeat(var(--columns), minmax(min(var(--cell-min), var(--fit-cell)), 1fr));
   gap: var(--tile-gap);
   align-items: stretch;
 }
@@ -201,7 +213,7 @@ button:disabled { cursor: default; }
   position: relative;
   z-index: 2;
   padding-bottom: .05em;
-  font-size: min(clamp(.76rem, 2.55cqi, 1.08rem), calc(157cqi / var(--score-length)));
+  font-size: min(clamp(.76rem, 2.55cqi, 1.08rem), calc(157cqi / var(--score-length)), calc(var(--goal-height) * .8));
   white-space: nowrap;
 }
 
@@ -217,7 +229,7 @@ button:disabled { cursor: default; }
   isolation: isolate;
   width: 100%;
   aspect-ratio: 1;
-  min-height: var(--cell-min);
+  min-height: min(var(--cell-min), var(--fit-cell));
   padding: 0;
   border-color: #654122;
   background: url("../../../shared/assets/board/cell-inlay.webp") center / 100% 100% no-repeat #17100d;
@@ -542,6 +554,10 @@ button:disabled, .score-editor-fields input:disabled { opacity: .59; }
   .controls { padding: 13px; }
   .gem-option { min-height: 52px; }
   .page-title p { font-size: .875rem; }
+}
+
+@media (max-width: 380px) {
+  .board-area { --board-scroll-space: 3rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -20,6 +20,8 @@ body {
   margin-inline: auto;
 }
 
+.dice-salon:has(#main-area-content > .board-area) { padding-bottom: 0; }
+
 .salon-header {
   min-height: 55px;
   display: flex;
