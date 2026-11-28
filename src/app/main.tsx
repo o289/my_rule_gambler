@@ -78,4 +78,9 @@ function App() {
 
 const root = document.getElementById('root');
 if (!root) throw new Error('プレビューの表示先が見つかりません。');
+document.addEventListener('contextmenu', event => event.preventDefault(), { capture: true });
+document.addEventListener('keydown', event => {
+  if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) event.preventDefault();
+}, { capture: true });
+
 createRoot(root).render(<App />);

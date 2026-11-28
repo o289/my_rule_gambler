@@ -81,13 +81,15 @@ async function createGameRoom(request: Request, env: ProbeEnvironment) {
   }
   if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return json({ error: 'Invalid room name' }, 400);
   const name = (payload as Record<string, unknown>).name;
-  if (typeof name !== 'string' || parseRoomName(name) !== name) return json({ error: 'ルーム名を1〜32文字で入力してください。' }, 400);
+  if (name !== undefined && (typeof name !== 'string' || parseRoomName(name) !== name)) {
+    return json({ error: 'ルーム名を1〜32文字で入力してください。' }, 400);
+  }
 
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const id = newRoomId();
     const room = env.GAME_ROOMS.get(env.GAME_ROOMS.idFromName(id));
     const created = await room.fetch(new Request('https://room.internal/__create', {
-      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, name }),
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id, name: name ?? id }),
     }));
     if (created.status === 409) continue;
     if (created.status !== 201) return json({ error: 'ルームを作成できませんでした。' }, 503);

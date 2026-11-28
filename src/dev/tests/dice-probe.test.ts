@@ -208,7 +208,7 @@ async function verifyRoomAdmission(endpoint: string, pageUrl: URL) {
   });
   assert.equal(foreignOrigin.status, 403);
 
-  const create = async (name: string) => {
+  const create = async (name?: string) => {
     const response = await fetch(apiUrl, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name }),
     });
@@ -225,8 +225,18 @@ async function verifyRoomAdmission(endpoint: string, pageUrl: URL) {
     return { id: value.id, name: value.name };
   };
 
-  const roomA = await create(`stg-${randomUUID().slice(0, 8)}-a`);
-  const roomB = await create(`stg-${randomUUID().slice(0, 8)}-b`);
+  for (const body of ['{"name":null}', '{"name":" "}', ' '.repeat(4097)]) {
+    const invalid = await fetch(apiUrl, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body,
+    });
+    assert.equal(invalid.status, 400);
+  }
+
+  const roomA = await create();
+  assert.equal(roomA.name, roomA.id);
+  const legacyName = `stg-${randomUUID().slice(0, 8)}-b`;
+  const roomB = await create(legacyName);
+  assert.equal(roomB.name, legacyName);
   assert.notEqual(roomA.id, roomB.id);
   for (const path of ['/casino-ws', '/dice-ws']) {
     const unknown = new URL(path, pageUrl);

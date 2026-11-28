@@ -16,7 +16,7 @@ export type Admission = { ok: true; room: CasinoRoomInfo } | { ok: false; proble
 export interface CasinoRoomTransport {
   getSnapshot(): ConnectionView;
   subscribe(listener: () => void): () => void;
-  create(name: string): Promise<Admission>;
+  create(): Promise<Admission>;
   join(roomId: string): Promise<Admission>;
   restore(roomId?: string): Promise<Admission> | undefined;
   setReady(ready: boolean): void;
@@ -63,10 +63,8 @@ export class CasinoConnection implements CasinoRoomTransport {
     for (const listener of this.listeners) listener();
   }
 
-  create(input: string): Promise<Admission> {
-    const name = parseRoomName(input);
-    return name ? this.admit({ type: 'create', name })
-      : Promise.resolve({ ok: false, problem: 'ルーム名を1〜32文字で入力してください。' });
+  create(): Promise<Admission> {
+    return this.admit({ type: 'create' });
   }
 
   join(input: string): Promise<Admission> {
@@ -99,13 +97,13 @@ export class CasinoConnection implements CasinoRoomTransport {
       this.pending = pending;
       this.update({ ...HOLD, status: 'connecting' });
       if (this.pending === pending) {
-        if (import.meta.env.MODE === 'stg' && request.type === 'create') void this.createRoom(request.name, pending);
+        if (import.meta.env.MODE === 'stg' && request.type === 'create') void this.createRoom(pending);
         else this.connect(request);
       }
     });
   }
 
-  private async createRoom(name: string, pending: Pending) {
+  private async createRoom(pending: Pending) {
     try {
       const endpoint = new URL(this.url);
       endpoint.protocol = endpoint.protocol === 'wss:' ? 'https:' : 'http:';
@@ -116,7 +114,7 @@ export class CasinoConnection implements CasinoRoomTransport {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name }),
+        body: '{}',
         signal: pending.abort.signal,
       });
       let payload: unknown;
