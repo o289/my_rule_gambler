@@ -366,9 +366,11 @@ button { font-family: inherit; }
   letter-spacing: .18em;
   overflow-wrap: anywhere;
 }
-.vip-room strong { color: #f2c48b; margin-inline-start: 3px; }
-.vip-room span { display: block; margin-top: 4px; }
-.vip-room code { color: #f3d9ac; font-size: .82rem; user-select: all; }
+.vip-room p { margin: 0; }
+.vip-room code { color: #f3d9ac; font-size: .82rem; }
+.vip-invite { margin-top: 6px; }
+.vip-room .vip-invite-status { margin-top: 4px; font-size: .75rem; line-height: 1.4; letter-spacing: normal; }
+.vip-room .vip-invite-status:empty { margin: 0; }
 
 .vip-table-layout {
   display: grid;

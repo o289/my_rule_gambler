@@ -235,6 +235,8 @@ test('保存済みルールは復元され、ルール項目のない旧形式�
 });
 
 test('部屋に入るメッセージは名前付きの部屋作成とIDによる検索を区別する', () => {
+  assert.deepEqual(readClientMessage({ type: 'create' }), { type: 'create' });
+  assert.equal(readClientMessage({ type: 'create', name: null }), null);
   assert.deepEqual(readClientMessage({ type: 'create', name: '  夜のサロン  ' }), { type: 'create', name: '夜のサロン' });
   assert.equal(readClientMessage({ type: 'create', name: ' ' }), null);
   assert.equal(readClientMessage({ type: 'create', name: 'table\u0007' }), null);

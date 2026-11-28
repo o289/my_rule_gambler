@@ -75,9 +75,11 @@ test('通常起動ではカジノとダイスの接続を同じ部屋につな�
     const guest = new LobbyClient(servers.casinoPort);
     const absent = new LobbyClient(servers.casinoPort);
     sockets.push(host.socket, guest.socket, absent.socket);
-    await host.send({ type: 'create', name: '共有卓' });
+    await host.send({ type: 'create' });
     const first = await host.wait('welcome');
     assert.equal(first.type, 'welcome');
+    assert.match(first.room.id, /^[a-f0-9]{8}$/);
+    assert.equal(first.room.name, first.room.id);
     await guest.send({ type: 'join', room: first.room.id });
     const second = await guest.wait('welcome');
     assert.equal(second.type, 'welcome');

@@ -23,7 +23,7 @@ export interface LobbyState {
 }
 
 export type ClientMessage =
-  | { type: 'create'; name: string }
+  | { type: 'create'; name?: string }
   | { type: 'join'; room: string; token?: string }
   | { type: 'ready'; ready: boolean; rulesRevision?: number }
   | { type: 'set-rules'; rules: GameRules; rulesRevision: number }
@@ -69,6 +69,7 @@ export function readClientMessage(value: unknown): ClientMessage | null {
   if (!record(value)) return null;
   switch (value.type) {
     case 'create': {
+      if (value.name === undefined) return { type: 'create' };
       const name = typeof value.name === 'string' ? parseRoomName(value.name) : null;
       return name ? { type: 'create', name } : null;
     }

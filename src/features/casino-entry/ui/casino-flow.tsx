@@ -8,7 +8,7 @@ import type { GameRules } from '../../../shared/contracts/game-rules';
 import type { Admission, CasinoRoomTransport, ConnectionView } from './connection';
 import { CasinoDoors, DOOR_FALLBACK_MS, RoomDoor, ROOM_UNLOCK_MS } from './casino-doors';
 import { RoomChooser } from './room-chooser';
-import type { RoomAction, RoomProblem } from './room-chooser';
+import type { RoomAction, RoomProblem, RoomRequest } from './room-chooser';
 import { casinoAssets, entranceGems } from './casino-assets';
 import { releaseDecodedImages } from './asset-loader';
 import { CrownIcon } from '../../players/ui/vip-icons';
@@ -112,7 +112,7 @@ export function VipLobby({ info, room, setReady, setRules, leave, blocked, deadl
         <div className="vip-title">
           <Crest className="vip-crown" />
           <h1 ref={title} tabIndex={-1}>VIP LOUNGE</h1>
-          <RoomIdentity room={room} />
+          <RoomIdentity key={room.id} roomId={room.id} disabled={blocked || enteringGame} />
         </div>
       </header>
       <div className="vip-table-layout" aria-label="参加席">
@@ -246,10 +246,29 @@ function RoomRulesDialog({ lobby, open, canEdit, opener, onClose, onSave }: {
   </dialog>;
 }
 
-function RoomIdentity({ room }: { room: CasinoRoomInfo }) {
+function RoomIdentity({ roomId, disabled }: { roomId: string; disabled: boolean }) {
+  const [invite, setInvite] = useState<'idle' | 'copying' | 'copied' | 'failed'>('idle');
+
+  async function copyInvite() {
+    setInvite('copying');
+    const url = new URL('https://stg-gambler.yudais-prod.com/');
+    url.searchParams.set('room', roomId);
+    try {
+      await navigator.clipboard.writeText(url.href);
+      setInvite('copied');
+    } catch {
+      setInvite('failed');
+    }
+  }
+
   return <div className="vip-room">
-    <strong>{room.name}</strong>
-    <span>ルームID <code id="lobby-room-id">{room.id.toUpperCase()}</code></span>
+    <p>ルームID <code id="lobby-room-id">{roomId.toUpperCase()}</code></p>
+    <button type="button" className="casino-plain vip-invite" disabled={disabled || invite === 'copying'}
+      onClick={() => { void copyInvite(); }}>部屋に招待</button>
+    <p className="vip-invite-status" role="status">
+      {invite === 'copied' && <>部屋のURLをコピーしました。<br />参加者に共有してください</>}
+      {invite === 'failed' && '部屋のURLをコピーできませんでした。もう一度お試しください。'}
+    </p>
   </div>;
 }
 
@@ -343,12 +362,12 @@ export function CasinoFlow({ connection, audio, invitedRoom, onRoomChanged }: {
     audio.playDoor();
   }
 
-  function openRoom(action: RoomAction, input: string) {
+  function openRoom(...[action, input]: RoomRequest) {
     if (sceneRef.current !== 'ROOM_SELECT') return;
     setRoomProblem(null);
     setRoomPending(action);
     moveTo('ROOM_CONNECTING');
-    const request = action === 'create' ? connection.create(input) : connection.join(input);
+    const request = action === 'create' ? connection.create() : connection.join(input);
     void resolveAdmission(action, request, false);
   }
 

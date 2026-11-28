@@ -44,7 +44,7 @@ export async function startCasinoServer(options: HttpOptions) {
                 }
                 let roomId = randomBytes(4).toString('hex');
                 while (registry.get(roomId)) roomId = randomBytes(4).toString('hex');
-                room = registry.create({ id: roomId, name: message.name });
+                room = registry.create({ id: roomId, name: message.name ?? roomId });
                 id = room?.connectLobby(roomPeer) ?? null;
               } else {
                 const existing = registry.get(message.room);
