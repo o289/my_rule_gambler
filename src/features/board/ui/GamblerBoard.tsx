@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, Ref } from 'react';
 import type { BoardDefinition, BoardState, CellAddress } from '../model/board-model';
 import { cellKey, formatScore, nextOpenCell, playableColumns, requiredGemAt } from '../model/board-model';
@@ -76,6 +76,7 @@ interface BoardProps {
 
 type BoardStyle = CSSProperties & {
   '--columns': number;
+  '--rows': number;
   '--beam-duration': string;
   '--plate-duration': string;
 };
@@ -93,20 +94,50 @@ export function GamblerBoard({ board, state, viewportRef, onSelect, scoreNotice,
   const [isOverflowing, setOverflowing] = useState(false);
   const style: BoardStyle = {
     '--columns': board.columns.length,
+    '--rows': Math.max(1, board.rows.length),
     '--beam-duration': `${SCORE_BEAM_MS}ms`,
     '--plate-duration': `${SCORE_PLATE_MS}ms`,
   };
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const viewport = scroller.current;
     const frame = cabinet.current;
-    if (!viewport || !frame) return;
-    const update = () => setOverflowing(viewport.scrollWidth > viewport.clientWidth);
+    const area = viewport?.parentElement;
+    if (!viewport || !frame || !area) return;
+    const visualViewport = window.visualViewport;
+    let frameId = 0;
+    const update = () => {
+      const visibleHeight = visualViewport?.scale === 1 ? visualViewport.height : window.innerHeight;
+      // Use the document position so scrolling to the preview controls does not resize the board.
+      const top = area.getBoundingClientRect().top + window.scrollY;
+      const available = `${Math.max(0, Math.floor(visibleHeight - top))}px`;
+      if (area.style.getPropertyValue('--board-height-limit') !== available) {
+        area.style.setProperty('--board-height-limit', available);
+      }
+      setOverflowing(viewport.scrollWidth > viewport.clientWidth);
+    };
+    const scheduleUpdate = () => {
+      if (frameId) return;
+      frameId = window.requestAnimationFrame(() => {
+        frameId = 0;
+        update();
+      });
+    };
     update();
-    const observer = new ResizeObserver(update);
+    const observer = new ResizeObserver(scheduleUpdate);
     observer.observe(viewport);
     observer.observe(frame);
-    return () => observer.disconnect();
+    for (let parent = area.parentElement; parent && parent !== document.body; parent = parent.parentElement) {
+      observer.observe(parent);
+    }
+    window.addEventListener('resize', scheduleUpdate);
+    visualViewport?.addEventListener('resize', scheduleUpdate);
+    return () => {
+      observer.disconnect();
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', scheduleUpdate);
+      visualViewport?.removeEventListener('resize', scheduleUpdate);
+    };
   }, []);
 
   return (

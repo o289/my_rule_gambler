@@ -155,6 +155,12 @@ body {
 .shared-board .board-scroll { padding-inline: 0; }
 .shared-board .board-scroll-hint { display: none; }
 
+@media (max-height: 860px) {
+  /* Keep the board's top edge stable as its height changes inside the preview stage. */
+  .effects-app .effect-stage > :is(.shared-board, .turn-scene),
+  .effects-app .turn-scene .shared-board { align-self: start; }
+}
+
 .board-cell[data-fx-target] {
   border-color: #ffe1a0;
   box-shadow: inset 0 0 0 1px #fbe5b43d, inset 0 0 12px #ffc66c93, 0 0 16px #ffb438aa;

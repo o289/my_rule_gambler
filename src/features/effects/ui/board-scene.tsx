@@ -134,9 +134,11 @@ export function BoardPlacementLight({ stage, board, gem, target, onComplete }: {
     let finished = false;
     const animate = (now: number) => {
       const cell = locateCell(root, target);
-      const surface = root.querySelector<HTMLElement>('.board-area');
+      const surface = root.querySelector<HTMLElement>('.board-cabinet');
+      const scroller = root.querySelector<HTMLElement>('.board-scroll');
       const shellRect = shell.getBoundingClientRect();
       const surfaceRect = (surface ?? root).getBoundingClientRect();
+      const visibleRight = scroller?.getBoundingClientRect().right ?? surfaceRect.right;
       const targetRect = cell?.getBoundingClientRect();
       if (!targetRect) {
         finished = true;
@@ -145,7 +147,7 @@ export function BoardPlacementLight({ stage, board, gem, target, onComplete }: {
       }
       const progress = Math.min(1, (now - started) / PLACEMENT_LIGHT_MS);
       const eased = 1 - (1 - progress) ** 3;
-      const startX = surfaceRect.right - shellRect.left - 18;
+      const startX = Math.min(surfaceRect.right, visibleRight) - shellRect.left - 18;
       const startY = surfaceRect.bottom - shellRect.top - 18;
       const endX = targetRect.left + targetRect.width / 2 - shellRect.left;
       const endY = targetRect.top + targetRect.height / 2 - shellRect.top;
