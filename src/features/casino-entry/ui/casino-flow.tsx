@@ -12,6 +12,7 @@ import type { RoomAction, RoomProblem } from './room-chooser';
 import { casinoAssets, entranceGems } from './casino-assets';
 import { releaseDecodedImages } from './asset-loader';
 import { CrownIcon } from '../../players/ui/vip-icons';
+import { RulebookDialog } from '../../rulebook/ui/rulebook-dialog';
 import '../../players/ui/style.css';
 import './casino.css';
 
@@ -131,6 +132,7 @@ export function VipLobby({ info, room, setReady, setRules, leave, blocked, deadl
       <footer className="vip-controls">
         <div className="vip-totals" aria-live="polite"><span>{joined.length} / {MAX_PLAYERS} 名</span><i aria-hidden="true" /><span>{ready} / {joined.length} READY</span></div>
         <p className="vip-status" role="status">{message}</p>
+        {!blocked && !enteringGame && <RulebookDialog disabled={rulesOpen} />}
         <button className="casino-action" id="ready-toggle" type="button" disabled={!mine || status !== 'online' || lobby?.phase === 'started'}
           aria-pressed={Boolean(mine?.ready)} onClick={() => setReady(!mine?.ready)}>
           <span>{mine?.ready ? 'READY 取消' : 'READY'}</span>
@@ -416,6 +418,7 @@ export function CasinoFlow({ connection, audio, invitedRoom, onRoomChanged }: {
           <div className="casino-entrance-controls">
             {scene === 'READY_TO_ENTER' && <>
               <button className="casino-action casino-enter" id="enter-casino" onClick={enter}><span>ENTER CASINO</span></button>
+              <RulebookDialog />
               <p className="entrance-completion" role="status">ロード完了 <span>100%</span></p>
             </>}
             {scene === 'RESTORING' && <p className="entrance-completion" role="status">ルームへ再接続しています…</p>}

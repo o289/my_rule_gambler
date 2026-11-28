@@ -1,0 +1,52 @@
+.vip-dialog.rulebook-dialog {
+  width: min(100% - 24px, 42rem);
+  height: min(100dvh - 24px, 40rem);
+}
+
+.rulebook-trigger {
+  padding-inline: 12px;
+}
+
+.rulebook-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #a7733d72;
+  text-align: start;
+}
+
+.rulebook-header h2 {
+  margin: 0;
+  color: var(--vip-gold);
+  font-size: 1.2rem;
+  overflow-wrap: anywhere;
+}
+
+.rulebook-header button {
+  padding-inline: 8px;
+}
+
+.vip-content.rulebook-content {
+  padding: 12px 8px;
+  text-align: start;
+  line-height: 1.65;
+}
+
+.rulebook-content h3 {
+  margin: 1em 0 .25em;
+  color: var(--vip-gold);
+}
+
+.rulebook-content h3:first-child {
+  margin-top: 0;
+}
+
+.rulebook-content :is(p, ol) {
+  margin: .35em 0 .7em;
+}
+
+.rulebook-content ol {
+  padding-inline-start: 1.6em;
+}
